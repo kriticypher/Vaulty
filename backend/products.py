@@ -77,13 +77,58 @@ def get_product_by_id(product_id: int, user_id: int) -> dict:
     finally:
         conn.close()
 
-if __name__ == "__main__":
-    test_prod = add_product(1, {
-        "name": "MacBook Pro M3",
-        "brand": "Apple",
-        "category": "Electronics",
-        "price": 169900.0,
-        "purchase_date": "2026-01-15",
-        "description": "14-inch Space Black laptop"
-    })
-    print("Add product result:", test_prod)
+def get_product_details(product_id: int, user_id: int) -> dict:
+    """
+    Returns full product details, together with any linked records in
+    Invoices (Member 2), Warranties, Returns, and ServiceRecords (Member 3).
+    Ensures seamless integration without redundant queries.
+    """
+    product = get_product_by_id(product_id, user_id)
+    if not product:
+        return None
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+
+        # Linked invoices (Member 2)
+        cur.execute("SELECT * FROM Invoices WHERE product_id = ?", (product_id,))
+        invoices = [_row_to_dict(r) for r in cur.fetchall()]
+
+        # Linked warranties (Member 3)
+        cur.execute("SELECT * FROM Warranties WHERE product_id = ?", (product_id,))
+        warranties = [_row_to_dict(r) for r in cur.fetchall()]
+
+        # Linked returns (Member 3)
+        cur.execute("SELECT * FROM Returns WHERE product_id = ?", (product_id,))
+        returns = [_row_to_dict(r) for r in cur.fetchall()]
+
+        # Linked service records (Member 3)
+        cur.execute("SELECT * FROM ServiceRecords WHERE product_id = ? ORDER BY service_date DESC", (product_id,))
+        services = [_row_to_dict(r) for r in cur.fetchall()]
+
+        return {
+            "product": product,
+            "invoices": invoices,
+            "warranties": warranties,
+            "returns": returns,
+            "services": services
+        }
+    finally:
+        conn.close()
+
+def get_all_products(user_id: int) -> list:
+    """
+    Fetches all products belonging to user_id, ordered newest first.
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM Products WHERE user_id = ? ORDER BY purchase_date DESC, created_at DESC",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
