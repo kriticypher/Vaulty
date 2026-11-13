@@ -780,3 +780,66 @@ body {
   gap: 0.4rem;
   flex-shrink: 0;
 }
+
+/* ── Member 2: Invoice Details Page ─────────────────────────────────────── */
+.invoice-detail-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.invoice-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.invoice-detail-row:last-child {
+  border-bottom: none;
+}
+
+.invoice-detail-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.invoice-detail-value {
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-align: right;
+  word-break: break-word;
+}
+
+.invoice-detail-link {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.invoice-detail-link:hover {
+  text-decoration: underline;
+}
+
+.invoice-detail-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.invoice-item-link {
+  color: var(--text-main);
+  text-decoration: none;
+}
+
+.invoice-item-link:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}

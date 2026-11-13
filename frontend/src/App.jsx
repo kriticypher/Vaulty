@@ -8,6 +8,7 @@ import Products from './pages/Products';
 import AddProduct from './pages/AddProduct';
 import ProductDetails from './pages/ProductDetails';
 import Invoices from './pages/Invoices';
+import InvoiceDetails from './pages/InvoiceDetails';
 import Analytics from './pages/Analytics';
 import Profile from './pages/Profile';
 import PlaceholderPage from './pages/PlaceholderPage';
@@ -69,6 +70,7 @@ export default function App() {
 
               {/* Member 2: Invoices & Receipts (replaces the integration placeholder) */}
               <Route path="/invoices" element={<Invoices />} />
+              <Route path="/invoices/:id" element={<InvoiceDetails />} />
 
               {/* Shared integration placeholder routes for Member 3 */}
               <Route

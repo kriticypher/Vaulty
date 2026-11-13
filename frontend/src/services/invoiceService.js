@@ -94,6 +94,19 @@ export function getProductInvoices(productId) {
   return api.get(`/api/products/${productId}/invoices`);
 }
 
+/** Opens one invoice's full details. */
+export function getInvoiceDetails(invoiceId) {
+  return api.get(`/api/invoices/${invoiceId}`);
+}
+
+/**
+ * Edits invoice information (invoice_number, seller, invoice_date and the
+ * linked product). The stored file itself never changes through this call.
+ */
+export function updateInvoice(invoiceId, changes) {
+  return api.put(`/api/invoices/${invoiceId}`, changes);
+}
+
 /** Deletes an invoice record and its stored file. */
 export function deleteInvoice(invoiceId) {
   return api.delete(`/api/invoices/${invoiceId}`);

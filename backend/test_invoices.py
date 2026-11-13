@@ -30,6 +30,7 @@ from invoices import (
     get_all_invoices,
     get_invoices_for_product,
     get_invoice_file,
+    update_invoice,
     delete_invoice,
     ensure_invoice_schema
 )
@@ -243,8 +244,46 @@ product_list = get_invoices_for_product(product1_id, user1_id)
 dates = [inv.get("uploaded_at") or "" for inv in product_list]
 assert_test("Invoices sorted newest-first by Merge Sort", dates == sorted(dates, reverse=True), str(dates))
 
-# ── 9. DELETION ─────────────────────────────────────────────────────────────
-print("\n9. Deletion Tests:")
+# ── 9. EDIT INVOICE INFORMATION (Part B) ────────────────────────────────────
+print("\n9. Edit Invoice Information Tests:")
+
+pdf_invoice_id = upload_pdf.get("invoice_id")
+
+edit1 = update_invoice(pdf_invoice_id, user1_id, {
+    "invoice_number": "INV-EDIT-1",
+    "seller": "Croma",
+    "invoice_date": "2026-03-01"
+})
+assert_test("Edit updates invoice_number, seller and invoice_date",
+            edit1.get("success") is True and
+            edit1["invoice"]["invoice_number"] == "INV-EDIT-1" and
+            edit1["invoice"]["seller"] == "Croma" and
+            edit1["invoice"]["invoice_date"] == "2026-03-01", str(edit1))
+
+edit2 = update_invoice(pdf_invoice_id, user1_id, {"product_id": product2_id})
+assert_test("Re-linking to another user's product is rejected",
+            edit2.get("success") is False, str(edit2))
+
+edit3 = update_invoice(pdf_invoice_id, user1_id, {"invoice_date": "March 3"})
+assert_test("Invalid invoice_date format rejected on edit",
+            edit3.get("success") is False, str(edit3))
+
+edit4 = update_invoice(pdf_invoice_id, user1_id, {"file_path": "../database/vaultly.db"})
+assert_test("file_path cannot be modified through the edit endpoint",
+            edit4.get("success") is True and
+            edit4["invoice"]["file_path"] != "../database/vaultly.db", str(edit4))
+
+edit5 = update_invoice(pdf_invoice_id, user2_id, {"seller": "Hacker"})
+assert_test("Foreign user cannot edit someone else's invoice",
+            edit5.get("success") is False, str(edit5))
+
+edited_invoice = get_invoice_by_id(pdf_invoice_id, user1_id)
+assert_test("Stored file survives metadata edits",
+            edited_invoice is not None and
+            os.path.isfile(os.path.join(invoices_module.UPLOAD_DIR, edited_invoice["file_path"])))
+
+# ── 10. DELETION ────────────────────────────────────────────────────────────
+print("\n10. Deletion Tests:")
 
 delete_result = delete_invoice(invoice1_id, user1_id)
 assert_test("Owner can delete their invoice", delete_result.get("success") is True, str(delete_result))

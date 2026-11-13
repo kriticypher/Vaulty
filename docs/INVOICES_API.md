@@ -12,15 +12,47 @@
 | Upload PDF / JPG / JPEG / PNG invoices (max 5 MB) | `POST /api/products/{id}/invoices` |
 | Browse all of the user's saved invoices | `GET /api/invoices` |
 | List invoices of one product | `GET /api/products/{id}/invoices` |
+| **Open one invoice's full details** | `GET /api/invoices/{id}` |
+| **Edit invoice information** | `PUT /api/invoices/{id}` |
 | Download / preview a stored invoice | `GET /api/invoices/{id}/download` |
 | Delete an invoice (record + stored file) | `DELETE /api/invoices/{id}` |
 
 Frontend pieces:
 - `frontend/src/pages/Invoices.jsx` — central Invoices page (replaces Member 1's placeholder route)
+- `frontend/src/pages/InvoiceDetails.jsx` — "open details" page at `/invoices/:id` with view + edit + preview/download/delete
 - `frontend/src/components/InvoiceUploader.jsx` — reusable upload widget
-- `frontend/src/components/InvoiceList.jsx` — reusable list with Preview / Download / Delete
+- `frontend/src/components/InvoiceList.jsx` — reusable list; clicking a file name opens its details page
 - `frontend/src/services/invoiceService.js` — API calls + client-side validation
 - Product details page now shows an "Invoices & Receipts" section instead of the placeholder card
+
+---
+
+## 2. Invoice Fields
+
+Every invoice record contains exactly the fields from the module spec, plus
+Member 1's schema columns:
+
+| Field | Editable? | Notes |
+|---|---|---|
+| `invoice_id` | never | auto-increment primary key |
+| `product_id` | via edit | must be a product **owned by the same user** |
+| `invoice_number` | via edit | free text, optional |
+| `seller` | via edit | free text, optional |
+| `invoice_date` | via edit | `YYYY-MM-DD` format, validated |
+| `file_path` | never | system-owned; only an upload/delete can change the stored file |
+
+`original_filename`, `file_size`, `mime_type` and `uploaded_at` are system-managed
+bookkeeping columns added by `ensure_invoice_schema()`.
+
+### `PUT /api/invoices/{id}` — Edit example
+
+```json
+{ "invoice_number": "INV-2026-001", "seller": "Croma", "invoice_date": "2026-03-01", "product_id": 7 }
+```
+
+- Omitted fields keep their current values; `file_path` is ignored by design, so a
+  malicious client can never re-point an invoice at another user's stored file.
+- Re-linking validates ownership of the **target** product (`403`-style error otherwise).
 
 ---
 
@@ -146,5 +178,9 @@ mismatches, the 5 MB limit (6 MB rejected, 4 MB accepted), corrupted Base64, pat
 traversal attempts, cross-user upload/read/download/delete denial, newest-first
 merge-sort ordering, and deletion removing both the row and the file.
 They run against an isolated temp database + temp uploads directory.
+
+Part B adds 6 more tests (section 9): editing metadata, re-link rejection for
+another user's product, invalid date rejection, `file_path` immutability,
+cross-user edit denial, and file survival across edits — **38 total, all passing**.
 
 Member 1's suite is unaffected: `python3 backend/test_suite.py` → 39 passed.

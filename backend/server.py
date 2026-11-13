@@ -31,7 +31,9 @@ from invoices import (
     upload_invoice,
     get_all_invoices,
     get_invoices_for_product,
+    get_invoice_by_id,
     get_invoice_file,
+    update_invoice,
     delete_invoice
 )
 
@@ -223,6 +225,24 @@ class VaultlyRequestHandler(BaseHTTPRequestHandler):
 
             return send_file_response(self, file_info, preview=preview)
 
+        # GET /api/invoices/{id} — open one invoice's full details
+        elif path.startswith("/api/invoices/"):
+            token = get_bearer_token(self)
+            user_id = get_user_id_from_token(token)
+            if not user_id:
+                return send_json_response(self, 401, {"error": "Authentication required."})
+
+            try:
+                invoice_id = int(path.split("/")[-1])
+            except ValueError:
+                return send_json_response(self, 400, {"error": "Invalid invoice ID format."})
+
+            invoice = get_invoice_by_id(invoice_id, user_id)
+            if not invoice:
+                return send_json_response(self, 404, {"error": "Invoice not found or access denied."})
+
+            return send_json_response(self, 200, {"invoice": invoice})
+
         # GET /api/products/{id}
         elif path.startswith("/api/products/"):
             token = get_bearer_token(self)
@@ -348,6 +368,26 @@ class VaultlyRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         data = read_json_body(self)
+
+        # read_json_body already sent a 413 response when the body was oversized.
+        if data is None:
+            return
+
+        # ── Member 2: PUT /api/invoices/{id} (edit invoice information) ──────
+        if path.startswith("/api/invoices/"):
+            token = get_bearer_token(self)
+            user_id = get_user_id_from_token(token)
+            if not user_id:
+                return send_json_response(self, 401, {"error": "Authentication required."})
+
+            try:
+                invoice_id = int(path.split("/")[-1])
+            except ValueError:
+                return send_json_response(self, 400, {"error": "Invalid invoice ID format."})
+
+            result = update_invoice(invoice_id, user_id, data)
+            status_code = 200 if result.get("success") else 400
+            return send_json_response(self, status_code, result)
 
         # PUT /api/products/{id}
         if path.startswith("/api/products/"):

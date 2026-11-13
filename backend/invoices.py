@@ -284,6 +284,70 @@ def upload_invoice(product_id: int, user_id: int, data: dict) -> dict:
         conn.close()
 
 
+# ── UPDATE (Edit Invoice Information) ────────────────────────────────────────
+
+def update_invoice(invoice_id: int, user_id: int, data: dict) -> dict:
+    """
+    Edits the metadata of an owned invoice: invoice_number, seller,
+    invoice_date, and optionally re-links it to another owned product
+    (product_id). file_path is SYSTEM-OWNED — it can only change by
+    uploading a new file, never through this edit endpoint, so a user can
+    never point an invoice record at someone else's stored file.
+    """
+    # 1. Ownership check on the invoice being edited.
+    invoice = get_invoice_by_id(invoice_id, user_id)
+    if not invoice:
+        return {"success": False, "error": "Invoice not found or access denied."}
+
+    # 2. Re-linking to a different product (optional; keeps current one by default).
+    new_product_id = data.get("product_id", invoice["product_id"])
+    try:
+        new_product_id = int(new_product_id)
+    except (ValueError, TypeError):
+        return {"success": False, "error": "Invalid product ID format."}
+    if new_product_id != invoice["product_id"]:
+        target_product = get_product_by_id(new_product_id, user_id)
+        if not target_product:
+            return {"success": False, "error": "Target product not found or access denied."}
+
+    # 3. Text metadata (empty form fields keep the current values).
+    invoice_number = (data.get("invoice_number") if data.get("invoice_number") is not None
+                      else invoice.get("invoice_number") or "")
+    invoice_number = str(invoice_number).strip()
+
+    seller = (data.get("seller") if data.get("seller") is not None
+              else invoice.get("seller") or "")
+    seller = str(seller).strip()
+
+    # 4. Date validation (must stay in the shared YYYY-MM-DD format).
+    invoice_date = (data.get("invoice_date") if data.get("invoice_date") is not None
+                    else invoice.get("invoice_date") or "")
+    invoice_date = str(invoice_date).strip()
+    if invoice_date and not _is_valid_date_string(invoice_date):
+        return {"success": False, "error": "Invoice date must use the YYYY-MM-DD format."}
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE Invoices
+               SET product_id = ?, invoice_number = ?, seller = ?, invoice_date = ?
+               WHERE invoice_id = ?""",
+            (new_product_id, invoice_number or None, seller or None,
+             invoice_date or None, invoice_id)
+        )
+        conn.commit()
+        return {
+            "success": True,
+            "message": "Invoice updated successfully.",
+            "invoice": get_invoice_by_id(invoice_id, user_id)
+        }
+    except Exception as db_error:
+        return {"success": False, "error": f"Update failed: {str(db_error)}"}
+    finally:
+        conn.close()
+
+
 # ── QUERIES ──────────────────────────────────────────────────────────────────
 
 def get_invoice_by_id(invoice_id: int, user_id: int) -> dict:

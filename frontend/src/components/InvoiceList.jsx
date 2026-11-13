@@ -6,6 +6,7 @@
  */
 
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   downloadInvoice,
   previewInvoice,
@@ -80,9 +81,9 @@ export default function InvoiceList({ invoices, showProduct = false, onDeleted }
           </div>
 
           <div className="invoice-item-info">
-            <span className="invoice-item-name">
+            <Link to={`/invoices/${invoice.invoice_id}`} className="invoice-item-name invoice-item-link">
               {invoice.original_filename || `Invoice #${invoice.invoice_id}`}
-            </span>
+            </Link>
             <span className="invoice-item-sub">
               {showProduct && invoice.product_name ? `${invoice.product_name} • ` : ''}
               {fileTypeBadge(invoice.mime_type)} • {formatFileSize(invoice.file_size)}
