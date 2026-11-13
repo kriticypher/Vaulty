@@ -12,6 +12,80 @@ def _row_to_dict(row):
         return None
     return dict(row)
 
+# ── DSA: MERGE SORT ALGORITHM ───────────────────────────────────────────────
+# Problem: Sort products by numerical price or ISO purchase date string.
+# Time Complexity:  O(n log n) in best, average, and worst cases.
+# Space Complexity: O(n) auxiliary memory for merged subarrays.
+# Academic explanation:
+# Divide and Conquer approach: divide list into two halves until length <= 1,
+# recursively sort each half, and merge the sorted halves in linear O(n) time.
+def merge_sort(arr: list, key_fn, reverse: bool = False) -> list:
+    """
+    Pure Python merge sort implementation.
+    key_fn: lambda extracting the comparison value from each element.
+    reverse: True for descending order, False for ascending.
+    """
+    if len(arr) <= 1:
+        return arr
+
+    mid = len(arr) // 2
+    left = merge_sort(arr[:mid], key_fn, reverse)
+    right = merge_sort(arr[mid:], key_fn, reverse)
+
+    return _merge(left, right, key_fn, reverse)
+
+def _merge(left: list, right: list, key_fn, reverse: bool) -> list:
+    result = []
+    i = j = 0
+
+    while i < len(left) and j < len(right):
+        val_left = key_fn(left[i])
+        val_right = key_fn(right[j])
+
+        # Normalize None values to avoid comparison errors
+        if val_left is None:
+            val_left = "" if isinstance(val_right, str) else 0
+        if val_right is None:
+            val_right = "" if isinstance(val_left, str) else 0
+
+        condition = (val_left >= val_right) if reverse else (val_left <= val_right)
+
+        if condition:
+            result.append(left[i])
+            i += 1
+        else:
+            result.append(right[j])
+            j += 1
+
+    result.extend(left[i:])
+    result.extend(right[j:])
+    return result
+
+# ── DSA: LINEAR SEARCH ALGORITHM ────────────────────────────────────────────
+# Problem: Search for a query substring across product names and brand names.
+# Time Complexity:  O(n) where n is the number of products.
+# Space Complexity: O(1) auxiliary space (excluding matched result output).
+# Academic explanation:
+# Sequentially inspects each product in the collection and performs a case-insensitive
+# substring search against product name and brand.
+def linear_search(products: list, query: str) -> list:
+    """
+    Performs linear search matching query string inside product name or brand.
+    """
+    if not query:
+        return products
+
+    query = query.strip().lower()
+    matched = []
+    for product in products:
+        name = (product.get("name") or "").lower()
+        brand = (product.get("brand") or "").lower()
+        if query in name or query in brand:
+            matched.append(product)
+    return matched
+
+# ── PRODUCT CRUD OPERATIONS ──────────────────────────────────────────────────
+
 def add_product(user_id: int, data: dict) -> dict:
     """
     Inserts a new product belonging to user_id.
@@ -24,7 +98,6 @@ def add_product(user_id: int, data: dict) -> dict:
     purchase_date = (data.get("purchase_date") or "").strip()
     description = (data.get("description") or "").strip()
 
-    # Validation
     if not name:
         return {"success": False, "error": "Product name is required."}
     if price_raw is None or price_raw == "":
@@ -81,7 +154,6 @@ def get_product_details(product_id: int, user_id: int) -> dict:
     """
     Returns full product details, together with any linked records in
     Invoices (Member 2), Warranties, Returns, and ServiceRecords (Member 3).
-    Ensures seamless integration without redundant queries.
     """
     product = get_product_by_id(product_id, user_id)
     if not product:
@@ -186,18 +258,49 @@ def delete_product(product_id: int, user_id: int) -> dict:
     finally:
         conn.close()
 
-def get_all_products(user_id: int) -> list:
+def get_all_products(user_id: int, search: str = "", category: str = "",
+                     min_price: float = None, max_price: float = None,
+                     sort_by: str = "") -> list:
     """
-    Fetches all products belonging to user_id, ordered newest first.
+    Fetches all products belonging to user_id, applying:
+    1. Database retrieval scoped to user_id
+    2. DSA Linear Search (name / brand)
+    3. Category and price range filtering
+    4. DSA Merge Sort (by price or date)
     """
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT * FROM Products WHERE user_id = ? ORDER BY purchase_date DESC, created_at DESC",
+            "SELECT * FROM Products WHERE user_id = ? ORDER BY created_at DESC",
             (user_id,)
         )
-        rows = cur.fetchall()
-        return [_row_to_dict(r) for r in rows]
+        products = [_row_to_dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
+    # 1. Apply DSA Linear Search
+    if search:
+        products = linear_search(products, search)
+
+    # 2. Filter by Category
+    if category:
+        products = [p for p in products if (p.get("category") or "").lower() == category.lower()]
+
+    # 3. Filter by Price Range
+    if min_price is not None:
+        products = [p for p in products if p.get("price", 0) >= min_price]
+    if max_price is not None:
+        products = [p for p in products if p.get("price", 0) <= max_price]
+
+    # 4. Apply DSA Merge Sort
+    if sort_by == "price_asc":
+        products = merge_sort(products, key_fn=lambda p: p.get("price", 0), reverse=False)
+    elif sort_by == "price_desc":
+        products = merge_sort(products, key_fn=lambda p: p.get("price", 0), reverse=True)
+    elif sort_by == "date_asc":
+        products = merge_sort(products, key_fn=lambda p: p.get("purchase_date") or "", reverse=False)
+    elif sort_by == "date_desc":
+        products = merge_sort(products, key_fn=lambda p: p.get("purchase_date") or "", reverse=True)
+
+    return products
