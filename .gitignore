@@ -15,6 +15,7 @@ database/*.db
 
 # Member 2: uploaded invoice files (never commit user documents)
 backend/uploads/
+backend-node/uploads/
 
 # Build outputs
 dist/

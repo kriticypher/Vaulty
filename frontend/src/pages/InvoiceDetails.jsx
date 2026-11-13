@@ -226,6 +226,13 @@ export default function InvoiceDetails() {
                 value={editForm.product_id}
                 onChange={(e) => setEditForm({ ...editForm, product_id: e.target.value })}
               >
+                {/* Fallback option keeps the current link visible even if the
+                    products list could not be loaded */}
+                {products.length === 0 && (
+                  <option value={invoice.product_id}>
+                    Product #{invoice.product_id} (list unavailable)
+                  </option>
+                )}
                 {products.map((product) => (
                   <option key={product.product_id} value={product.product_id}>
                     {product.name} (#{product.product_id})

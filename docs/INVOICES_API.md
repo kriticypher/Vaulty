@@ -3,6 +3,12 @@
 **Module Owner:** Member 2
 **Depends on:** Member 1's authentication, shared SQLite database and product table
 
+> **Backend note:** This module was originally written for the Python stdlib backend and is
+> now fully ported to the Node.js + Prisma backend (`backend-node/`). Both implementations
+> expose identical endpoints and JSON shapes; the Python version in `backend/` is kept only
+> as a reference until the team confirms removal. The test suite for the Node backend lives
+> at `backend-node/smoke_test.js` (`npm test`, 36 checks).
+
 ---
 
 ## 1. What This Module Adds

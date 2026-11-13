@@ -18,7 +18,7 @@ export default function Sidebar({ user, onLogout }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <span className="brand-icon">🔐</span>
+        <img src="/vaulty-logo.png" alt="Vaultly logo" className="brand-logo-img" />
         <span className="brand-name">Vaultly</span>
       </div>
 

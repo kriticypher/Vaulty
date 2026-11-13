@@ -843,3 +843,20 @@ body {
   color: var(--primary);
   text-decoration: underline;
 }
+
+/* ── Member 2: Vaultly Logo (public/vaulty-logo.png) ────────────────────── */
+.brand-logo-img {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+
+.auth-logo-img {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  margin-bottom: 0.5rem;
+}
