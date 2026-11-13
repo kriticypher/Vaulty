@@ -5,6 +5,8 @@
 
 const API_BASE = 'http://localhost:8000';
 
+export { API_BASE };
+
 function getToken() {
   return localStorage.getItem('vaultly_token') || '';
 }

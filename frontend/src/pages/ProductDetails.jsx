@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import InvoiceUploader from '../components/InvoiceUploader';
+import InvoiceList from '../components/InvoiceList';
 
 export default function ProductDetails() {
   const { id } = useParams();
@@ -244,25 +246,42 @@ export default function ProductDetails() {
         </div>
       )}
 
-      {/* Integration Placeholders for Member 2 & Member 3 */}
+      {/* Invoices (Member 2) */}
+      <div className="card" style={{ marginTop: '1.5rem', marginBottom: '1.5rem' }}>
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>
+          🧾 Invoices & Receipts
+        </h3>
+        <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1rem' }}>
+          Attach purchase receipts (PDF, JPG, JPEG, PNG — max 5 MB) to this product. Saved
+          documents can be previewed or downloaded any time.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', alignItems: 'start' }}>
+          <InvoiceUploader
+            productId={p.product_id}
+            productLabel={p.name}
+            onUploaded={loadDetails}
+          />
+
+          <div>
+            {details.invoices && details.invoices.length > 0 ? (
+              <InvoiceList
+                invoices={details.invoices}
+                onDeleted={loadDetails}
+              />
+            ) : (
+              <p className="upload-note">No receipts uploaded yet for this product.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Linked Records (Member 3) */}
       <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem' }}>
         Linked Records (Team Integration Placeholders)
       </h2>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
-        {/* Invoices (Member 2) */}
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <h4 style={{ fontSize: '1rem', fontWeight: 600 }}>🧾 Invoices & OCR</h4>
-            <span className="badge badge-warning">Member 2</span>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: '#64748b' }}>
-            {details.invoices && details.invoices.length > 0
-              ? `${details.invoices.length} receipt(s) attached`
-              : 'No receipts uploaded yet for this product.'}
-          </p>
-        </div>
-
         {/* Warranties (Member 3) */}
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

@@ -13,6 +13,9 @@ __pycache__/
 database/*.db
 *.sqlite3
 
+# Member 2: uploaded invoice files (never commit user documents)
+backend/uploads/
+
 # Build outputs
 dist/
 build/
