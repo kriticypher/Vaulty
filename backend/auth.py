@@ -6,7 +6,6 @@ unique per-user salts, login validation, and token-based session management.
 
 import hashlib
 import secrets
-import re
 from database import get_connection
 
 # In-memory session store mapping token -> user_id
@@ -77,6 +76,89 @@ def register_user(name: str, email: str, password: str, confirm_password: str = 
     finally:
         conn.close()
 
+def login_user(email: str, password: str) -> dict:
+    """
+    Authenticates a user by email and password.
+    Returns a secure session token and user profile on success.
+    """
+    email = (email or "").strip().lower()
+    if not email or not password:
+        return {"success": False, "error": "Email and password are required."}
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id, name, email, password_hash, salt FROM Users WHERE email = ?",
+            (email,)
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return {"success": False, "error": "Invalid email or password."}
+
+    # Verify entered password with the user's unique salt
+    computed_hash = hash_password(password, row["salt"])
+    if computed_hash != row["password_hash"]:
+        return {"success": False, "error": "Invalid email or password."}
+
+    # Generate cryptographically unpredictable 256-bit token
+    token = secrets.token_hex(SESSION_TOKEN_BYTES)
+    sessions[token] = row["user_id"]
+
+    return {
+        "success": True,
+        "token": token,
+        "user": {
+            "user_id": row["user_id"],
+            "name": row["name"],
+            "email": row["email"]
+        }
+    }
+
+def logout_user(token: str) -> dict:
+    """
+    Invalidates the given session token.
+    """
+    if token in sessions:
+        del sessions[token]
+    return {"success": True, "message": "Logged out successfully."}
+
+def get_user_id_from_token(token: str):
+    """
+    Validates token and returns the corresponding user_id.
+    Returns None if token is invalid or missing.
+    """
+    if not token:
+        return None
+    return sessions.get(token)
+
+def get_user_profile(user_id: int) -> dict:
+    """
+    Retrieves user profile info without exposing sensitive credentials.
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id, name, email, created_at FROM Users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+        return None
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
-    test_res = register_user("Test User", "test@vaultly.com", "password123")
-    print("Registration test result:", test_res)
+    login_res = login_user("test@vaultly.com", "password123")
+    print("Login test result:", login_res)
+    if login_res.get("success"):
+        token = login_res["token"]
+        print("Token verification:", get_user_id_from_token(token))
+        logout_res = logout_user(token)
+        print("Logout test result:", logout_res)
+        print("Token verification post-logout:", get_user_id_from_token(token))
