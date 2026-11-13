@@ -117,6 +117,75 @@ def get_product_details(product_id: int, user_id: int) -> dict:
     finally:
         conn.close()
 
+def update_product(product_id: int, user_id: int, data: dict) -> dict:
+    """
+    Updates an existing product.
+    Enforces user ownership and validates all updated parameters.
+    """
+    existing = get_product_by_id(product_id, user_id)
+    if not existing:
+        return {"success": False, "error": "Product not found or access denied."}
+
+    name = (data.get("name") or existing["name"]).strip()
+    brand = (data.get("brand") or existing["brand"])
+    category = (data.get("category") or existing["category"])
+    price_raw = data.get("price", existing["price"])
+    purchase_date = (data.get("purchase_date") or existing["purchase_date"]).strip()
+    description = (data.get("description") or existing["description"])
+
+    if not name:
+        return {"success": False, "error": "Product name cannot be empty."}
+
+    try:
+        price = float(price_raw)
+        if price < 0:
+            return {"success": False, "error": "Price cannot be negative."}
+    except (ValueError, TypeError):
+        return {"success": False, "error": "Price must be a valid number."}
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE Products
+               SET name = ?, brand = ?, category = ?, price = ?, purchase_date = ?, description = ?
+               WHERE product_id = ? AND user_id = ?""",
+            (name, brand, category, price, purchase_date, description, product_id, user_id)
+        )
+        conn.commit()
+        return {
+            "success": True,
+            "message": "Product updated successfully.",
+            "product": get_product_by_id(product_id, user_id)
+        }
+    except Exception as e:
+        return {"success": False, "error": f"Update failed: {str(e)}"}
+    finally:
+        conn.close()
+
+def delete_product(product_id: int, user_id: int) -> dict:
+    """
+    Deletes a product if it belongs to user_id.
+    Foreign key ON DELETE CASCADE safely cleans up related child records.
+    """
+    existing = get_product_by_id(product_id, user_id)
+    if not existing:
+        return {"success": False, "error": "Product not found or access denied."}
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM Products WHERE product_id = ? AND user_id = ?",
+            (product_id, user_id)
+        )
+        conn.commit()
+        return {"success": True, "message": "Product deleted successfully."}
+    except Exception as e:
+        return {"success": False, "error": f"Deletion failed: {str(e)}"}
+    finally:
+        conn.close()
+
 def get_all_products(user_id: int) -> list:
     """
     Fetches all products belonging to user_id, ordered newest first.
