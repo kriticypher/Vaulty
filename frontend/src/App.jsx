@@ -1,122 +1,147 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import Sidebar from './components/Sidebar';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Dashboard from './pages/Dashboard';
+import Products from './pages/Products';
+import AddProduct from './pages/AddProduct';
+import ProductDetails from './pages/ProductDetails';
+import Analytics from './pages/Analytics';
+import Profile from './pages/Profile';
+import PlaceholderPage from './pages/PlaceholderPage';
+import { authService } from './services/authService';
+import { api } from './services/api';
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = authService.getToken();
+    const storedUser = authService.getUser();
+
+    if (token && storedUser) {
+      setUser(storedUser);
+    }
+    setLoading(false);
+  }, []);
+
+  const handleLogin = (userData, token) => {
+    localStorage.setItem('vaultly_token', token);
+    localStorage.setItem('vaultly_user', JSON.stringify(userData));
+    setUser(userData);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await api.post('/api/logout');
+    } catch {
+      // Ignore network errors on logout
+    }
+    authService.clearSession();
+    setUser(null);
+  };
+
+  if (loading) {
+    return (
+      <div className="loading-spinner-full">
+        <div className="loading-spinner" />
+      </div>
+    );
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <BrowserRouter>
+      {user ? (
+        <div className="app-layout">
+          <Sidebar user={user} onLogout={handleLogout} />
+          <main className="main-content">
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/products" element={<Products />} />
+              <Route path="/products/add" element={<AddProduct />} />
+              <Route path="/products/:id" element={<ProductDetails />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/profile" element={<Profile user={user} />} />
 
-      <div className="ticks"></div>
+              {/* Shared integration placeholder routes for Members 2 & 3 */}
+              <Route
+                path="/invoices"
+                element={
+                  <PlaceholderPage
+                    title="Invoices & Receipts"
+                    member="Member 2 (Invoices & OCR)"
+                    description="Upload, preview, parse, and detect duplicate invoices and receipts."
+                    plannedFeatures={[
+                      'Invoice file upload (PDF, PNG, JPG)',
+                      'OCR automated data extraction',
+                      'Side-by-side document preview',
+                      'Duplicate receipt detection',
+                      'CSV purchase export'
+                    ]}
+                  />
+                }
+              />
+              <Route
+                path="/warranties"
+                element={
+                  <PlaceholderPage
+                    title="Warranty Tracker"
+                    member="Member 3 (Warranties & Reminders)"
+                    description="Monitor active, expiring soon, and expired product warranties."
+                    plannedFeatures={[
+                      'Automatic expiry date calculation',
+                      'Active vs Expiring Soon (≤30 days) vs Expired status',
+                      'In-app reminders on application open',
+                      'Nearest expiry sorting'
+                    ]}
+                  />
+                }
+              />
+              <Route
+                path="/returns"
+                element={
+                  <PlaceholderPage
+                    title="Return Windows"
+                    member="Member 3 (Warranties & Reminders)"
+                    description="Track return deadlines and statuses for recently ordered items."
+                    plannedFeatures={[
+                      'Return deadline reminders (≤3 days remaining)',
+                      'Mark as Returned / Non-returnable',
+                      'Seller-specific custom return policy windows'
+                    ]}
+                  />
+                }
+              />
+              <Route
+                path="/service-history"
+                element={
+                  <PlaceholderPage
+                    title="Service & Repair History"
+                    member="Member 3 (Warranties & Reminders)"
+                    description="Log service records, maintenance fees, and repair center notes."
+                    plannedFeatures={[
+                      'Log maintenance dates and service center details',
+                      'Track individual repair costs',
+                      'Total maintenance expenditure per product'
+                    ]}
+                  />
+                }
+              />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </main>
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      ) : (
+        <Routes>
+          <Route path="/login" element={<Login onLogin={handleLogin} />} />
+          <Route path="/register" element={<Register onLogin={handleLogin} />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      )}
+    </BrowserRouter>
+  );
 }
-
-export default App
