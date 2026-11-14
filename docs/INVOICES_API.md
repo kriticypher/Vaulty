@@ -417,7 +417,43 @@ brute-force and rainbow-table attacks impractical.
 
 ---
 
-## 12. Testing
+## 12. Part F: CSV Export
+
+`GET /api/invoices/export` — authenticated, streams the logged-in user's
+invoices as a downloadable CSV file.
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/csv; charset=utf-8
+Content-Disposition: attachment; filename="vaultly-invoices.csv"
+X-Content-Type-Options: nosniff
+```
+
+- **Zero new dependencies** — written with JavaScript's built-in capabilities
+  (`src/csv.js`, RFC 4180: cells with commas/quotes/newlines are wrapped in
+  double quotes, inner quotes doubled).
+- **Only the logged-in user's records** — the query scopes through
+  `product.user_id`, identical to every other invoice endpoint.
+- **Columns** (13): Invoice ID, Invoice Number, Seller, Invoice Date, Product
+  Name, Product Brand, Product Category, Product Price, Product Purchase Date,
+  File Name, File Size, OCR Processed, Uploaded At. A UTF-8 BOM is prepended so
+  Excel renders non-ASCII sellers correctly.
+- **Nothing sensitive or internal is exported**: no password hashes or salts
+  (the query never touches `Users`), no session tokens (the `Sessions` table is
+  unreachable from this query), and no internal columns (`file_path`,
+  `file_hash`, `ocr_text`).
+- **CSV formula injection defense (OWASP)**: a cell whose value begins with
+  `=`, `+`, `-`, `@`, TAB or CR would be executed as a formula by Excel/Sheets
+  (`=HYPERLINK("http://evil")` is a classic phishing vector). Every such cell is
+  prefixed with a single quote `'`, which spreadsheets treat as plain text.
+  Tests cover `=HYPERLINK(…)`, `@Store`, `+91…` and `-9876` sellers.
+- Frontend: an **⬇️ Export CSV** button on the Invoices page streams the file
+  via `fetch` + a temporary object-URL download link
+  (`invoiceService.downloadInvoicesCsv()`).
+
+---
+
+## 13. Testing
 
 ```bash
 python3 backend/test_invoices.py
@@ -439,8 +475,11 @@ CID/Identity-H PDF (ToUnicode decoding), month-name date normalization,
 validation parity with upload, `ocr_text` storage/truncation, exact-file
 duplicate rejection (`duplicate_reason: identical_file`, force exception,
 cross-user isolation, stored hash verification), and the
-degraded-garbage-image path — **101 total, all passing** (`npm test` from
-`backend-node/`).
+degraded-garbage-image path. Section 14 (Part F) covers CSV export: auth
+requirement, response headers, per-user scope, row-count parity, absence of
+any hash/salt/token material, formula-injection neutralisation, RFC 4180
+quoting, and uniform column counts — **121 total, all passing** (`npm test`
+from `backend-node/`).
 
 Note: tesseract.js downloads its English language data on first use (needs
 internet once); until then image OCR degrades to the manual-entry path while

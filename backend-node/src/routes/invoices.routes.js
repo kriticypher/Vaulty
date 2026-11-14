@@ -7,6 +7,7 @@ import { getUserIdFromRequest } from '../auth.js';
 import {
   uploadInvoice,
   searchInvoices,
+  exportInvoicesCsv,
   getInvoicesForProduct,
   getInvoiceById,
   getInvoiceFile,
@@ -60,6 +61,20 @@ invoices.post('/invoices/ocr-preview', async (req, res) => {
 
   const ocr = await extractInvoiceFields(validation.originalName, validation.fileBytes);
   return res.json({ success: true, ocr });
+});
+
+// ── GET /api/invoices/export — Part F: CSV download of the user's invoices ───
+//   Must stay registered BEFORE '/invoices/:id' so "export" is not read as an id.
+invoices.get('/invoices/export', async (req, res) => {
+  const userId = await requireUser(req, res);
+  if (!userId) return;
+
+  const csv = await exportInvoicesCsv(userId);
+  // UTF-8 BOM keeps Excel/Sheets from mangling non-ASCII sellers.
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="vaultly-invoices.csv"');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  return res.status(200).send('\uFEFF' + csv);
 });
 
 // ── GET /api/products/:id/invoices — invoices linked to one owned product ────
