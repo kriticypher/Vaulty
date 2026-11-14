@@ -68,9 +68,15 @@ model Invoices {
   file_size         Int?
   mime_type         String?
   uploaded_at       DateTime @default(now())
+  ocr_text          String?  // raw text extracted by the OCR pass (Part: OCR)
+  ocr_processed     Boolean  @default(false)
   product           Products @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
 
   @@index([product_id])
+  // Part E: search & sort performance (coordinated schema additions — see docs)
+  @@index([invoice_number])
+  @@index([seller])
+  @@index([invoice_date])
 }
 
 // ── Member 3: Warranty Management (schema hook, owned by Member 3) ───────────

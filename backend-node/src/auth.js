@@ -1,6 +1,8 @@
 // auth.js - Authentication module for Vaultly (Node.js).
-// Password hashing with PBKDF2-HMAC-SHA256 (100,000 iterations) using Node's
-// built-in crypto module — no bcrypt dependency needed.
+// Password hashing with **bcrypt** (bcryptjs, cost factor 10). Existing
+// accounts created before this change stored PBKDF2-HMAC-SHA256 hashes; those
+// still verify (legacy path) and are transparently re-hashed to bcrypt on the
+// next successful login.
 //
 // SESSIONS: tokens are stored in the Sessions table with a 7-day expiry and
 // delivered to the browser in an HttpOnly cookie. Because they live in the
@@ -8,15 +10,32 @@
 // stays logged in until the cookie expires or they log out.
 
 import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { prisma } from './prisma.js';
 
 const SESSION_TOKEN_BYTES = 32;
 export const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const BCRYPT_COST = 10; // 2^10 rounds ≈ ~100ms per hash on typical laptops
 
-export function hashPassword(password, salt) {
-  // PBKDF2 is intentionally slow to resist brute-force and rainbow-table attacks.
-  // A unique per-user salt makes identical passwords hash differently.
-  return crypto.pbkdf2Sync(String(password), salt, 100_000, 32, 'sha256').toString('hex');
+export function hashPassword(password) {
+  // bcrypt embeds the salt inside the hash string and is deliberately slow
+  // (cost factor) to resist brute-force and rainbow-table attacks.
+  return bcrypt.hashSync(String(password), BCRYPT_COST);
+}
+
+const isBcryptHash = (hash) => /^\$2[aby]\$/.test(hash || '');
+
+function verifyPassword(password, storedHash, salt) {
+  if (isBcryptHash(storedHash)) {
+    // Current scheme: bcrypt (salt is embedded in the hash)
+    return { valid: bcrypt.compareSync(String(password), storedHash), legacy: false };
+  }
+  // Legacy scheme (pre-bcrypt accounts): PBKDF2-HMAC-SHA256, 100k iterations
+  const computed = crypto.pbkdf2Sync(String(password), salt, 100_000, 32, 'sha256').toString('hex');
+  const a = Buffer.from(computed, 'hex');
+  const b = Buffer.from(storedHash, 'hex');
+  const valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+  return { valid, legacy: true };
 }
 
 export function registerUser(name, email, password, confirmPassword = null) {
@@ -38,8 +57,8 @@ export function registerUser(name, email, password, confirmPassword = null) {
         return resolve({ success: false, error: 'Passwords do not match.' });
       }
 
-      const salt = crypto.randomBytes(16).toString('hex'); // 16-byte random salt
-      const passwordHash = hashPassword(password, salt);
+      const salt = crypto.randomBytes(16).toString('hex'); // kept for legacy hash migration
+      const passwordHash = hashPassword(password); // bcrypt (salt embedded in hash)
 
       try {
         const created = await prisma.users.create({
@@ -72,12 +91,18 @@ export async function loginUser(email, password) {
     return { success: false, error: 'Invalid email or password.' };
   }
 
-  const computedHash = hashPassword(password, user.salt);
-  // timingSafeEqual prevents timing attacks on the comparison
-  const a = Buffer.from(computedHash, 'hex');
-  const b = Buffer.from(user.password_hash, 'hex');
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+  const { valid, legacy } = verifyPassword(password, user.password_hash, user.salt);
+  if (!valid) {
     return { success: false, error: 'Invalid email or password.' };
+  }
+
+  // Transparent upgrade: legacy PBKDF2 accounts are re-hashed with bcrypt
+  // after a successful login, so the whole table migrates organically.
+  if (legacy) {
+    await prisma.users.update({
+      where: { user_id: user.user_id },
+      data: { password_hash: hashPassword(password) }
+    });
   }
 
   // Housekeeping: purge this user's expired sessions

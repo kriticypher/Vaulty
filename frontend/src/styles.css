@@ -907,3 +907,13 @@ body {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+
+/* ── Member 2: OCR auto-fill note ────────────────────────────────────────── */
+.ocr-note {
+  color: #1d4ed8;
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+}

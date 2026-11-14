@@ -6,13 +6,15 @@ import fs from 'node:fs';
 import { getUserIdFromRequest } from '../auth.js';
 import {
   uploadInvoice,
-  getAllInvoices,
+  searchInvoices,
   getInvoicesForProduct,
   getInvoiceById,
   getInvoiceFile,
   updateInvoice,
-  deleteInvoice
+  deleteInvoice,
+  validateFilePayload
 } from '../invoices.js';
+import { extractInvoiceFields } from '../ocr.js';
 
 export const invoices = Router();
 
@@ -30,11 +32,34 @@ async function requireUser(req, res, message = 'Authentication required. Please 
   return userId;
 }
 
-// ── GET /api/invoices — every invoice owned by the logged-in user ────────────
+// ── GET /api/invoices — list, search (Part E) and sort ───────────────────────
+//   ?search=alpha&field=all|invoice_number|seller|product&sort=date_asc|date_desc
 invoices.get('/invoices', async (req, res) => {
   const userId = await requireUser(req, res);
   if (!userId) return;
-  return res.json({ invoices: await getAllInvoices(userId) });
+
+  const invoices = await searchInvoices(userId, {
+    search: req.query.search || '',
+    field: req.query.field || 'all',
+    sort: req.query.sort || ''
+  });
+  return res.json({ invoices });
+});
+
+// ── POST /api/invoices/ocr-preview — extract fields from a file (Part: OCR) ──
+//   Same Base64 JSON envelope as the upload, but nothing is stored: the result
+//   is used to pre-fill the upload form, which the user can edit before saving.
+invoices.post('/invoices/ocr-preview', async (req, res) => {
+  const userId = await requireUser(req, res);
+  if (!userId) return;
+
+  const validation = validateFilePayload(req.body || {});
+  if (!validation.success) {
+    return res.status(400).json({ success: false, error: validation.error });
+  }
+
+  const ocr = await extractInvoiceFields(validation.originalName, validation.fileBytes);
+  return res.json({ success: true, ocr });
 });
 
 // ── GET /api/products/:id/invoices — invoices linked to one owned product ────

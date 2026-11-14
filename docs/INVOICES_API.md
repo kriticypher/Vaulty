@@ -282,7 +282,126 @@ Consequences:
 
 ---
 
-## 9. Testing
+## 9. Part E: Search & Sorting
+
+`GET /api/invoices` now accepts optional query parameters (all authenticated & per-user):
+
+```
+GET /api/invoices?search=alpha&field=all&sort=date_asc
+```
+
+| Param | Values | Meaning |
+|---|---|---|
+| `search` | any text | Substring, case-insensitive match |
+| `field` | `all` (default), `invoice_number`, `seller`, `product` | Which column(s) to match; `product` matches the linked product's name |
+| `sort` | `date_asc`, `date_desc` (default: newest uploads first) | Order by invoice date; invoices without a date always sort **last** |
+
+- Implemented in `src/invoices.js` → `searchInvoices()`: **Prisma queries** for the
+  pure-sort listings (`prisma.invoices.findMany` + `orderBy`), and one
+  **parameterized raw SQL** query (`Prisma.sql` fragments — never string
+  concatenation) when search + sort combine, so the filter and the order are
+  evaluated by SQLite in a single pass.
+- Case-insensitivity comes free in SQLite: `LIKE` on ASCII text ignores case.
+- Date ties break by newest upload first (`uploaded_at DESC`).
+
+### Time complexity (viva explanation)
+
+Let `n` = number of the user's invoices and `m` = length of the search text.
+
+| Operation | Without index | With the new index |
+|---|---|---|
+| Search `LIKE '%q%'` | **O(n · m)** — every row is compared (the leading `%` makes the pattern unanchored, so a B-tree cannot seek into the middle of it) | same — leading-wildcard searches are inherently linear; the index helps only anchored searches (`LIKE 'q%'`) |
+| Sort by `invoice_date` | **O(n log n)** comparison sort | **O(n)** — SQLite walks the `Invoices(invoice_date)` index, which is already ordered, and skips the sort step entirely |
+| Search + sort combined | O(n log n) after the O(n) filter | O(n) filter + O(n) index walk |
+| Default listing (no params) | hand-written **Merge Sort** on `uploaded_at` — O(n log n) worst case, kept deliberately for the DSA/ADA viva demo | — |
+| Linear Search (products) | O(n) scan — used by Member 1's `?search=` product filter | — |
+
+### Database indexes (coordinated with Member 1)
+
+Added to the `Invoices` model (`prisma db push` applied):
+
+```prisma
+@@index([invoice_number])   // exact/anchored lookups + duplicate-check helper
+@@index([seller])           // exact/anchored lookups
+@@index([invoice_date])     // makes date_asc/date_desc an O(n) index walk
+```
+
+No index was added on `Products(name)` (that table is Member 1's) — flagged for
+coordination; Member 1's product search is the O(n) Linear Search on purpose.
+
+---
+
+## 10. OCR: auto-detecting invoice details (images & PDFs)
+
+`POST /api/invoices/ocr-preview` — same Base64 JSON envelope as the upload
+(`file_name`, `file_data`), same validation (whitelist, 5 MB cap, magic bytes),
+but **nothing is stored**. The response pre-fills the upload form:
+
+```json
+{
+  "success": true,
+  "ocr": {
+    "text": "Invoice No: INV-2026-777 Sold by: Acme Traders Date: 2026-02-15",
+    "invoice_number": "INV-2026-777",
+    "seller": "Acme Traders",
+    "invoice_date": "2026-02-15",
+    "engine": "pdf-zlib"
+  }
+}
+```
+
+**Two extraction engines, both fully local (no cloud APIs):**
+
+| File type | Engine | How it works |
+|---|---|---|
+| PDF | `pdf-zlib` (hand-written, zero dependencies) | Locates every `stream…endstream` payload, inflates FlateDecode streams with Node's built-in `zlib`, and pulls the text out of PDF text-show operators (`(text) Tj`, `[(t)(e)(xt)] TJ`). Scanned/image-only PDFs have no text operators → empty result, user types manually. |
+| JPG / PNG | `tesseract.js` (pure WebAssembly Tesseract) | OCR in a worker thread; the English language data is downloaded once and cached. |
+
+**Field heuristics** (`src/ocr.js`): labeled patterns (`Invoice No:`, `Bill #`,
+`Sold by:`, `Merchant:` …), a bare `INV-…` code fallback for numbers, and a date
+normalizer that accepts `YYYY-MM-DD`, `YYYY/MM/DD` and `DD/MM/YYYY` (when the
+first number can't be a day it assumes `MM/DD/YYYY`) → always emits `YYYY-MM-DD`.
+
+**Frontend flow** (`InvoiceUploader.jsx`): the moment a valid file is selected,
+`ocrExtract()` sends it to the preview endpoint and auto-fills **only the empty
+fields** (never overwriting what the user typed), showing a blue note
+(`🤖 Auto-filled invoice number, date from the file (OCR — …). Please verify.`).
+A stale-result guard (`latestFileRef`) stops a slow OCR pass from filling the
+form for a file the user already replaced.
+
+**Graceful degradation:** OCR is best-effort. A garbled image, a scanned PDF, or
+a missing language cache simply returns empty fields / a friendly message —
+the upload never fails because of OCR, and the server stores `ocr_text`
+(truncated to 5000 chars) + `ocr_processed` only when the client sends them.
+
+**Known hardening found by tests:** tesseract.js *throws synchronously* inside
+its message handler for unreadable images unless an `errorHandler` is supplied —
+that would crash the whole Node process. Vaultly passes a no-op
+`errorHandler` (the recognize promise still rejects normally), races the
+recognition against a 60 s timeout, and recycles the worker after a failure.
+
+---
+
+## 11. Password hashing: bcrypt
+
+Passwords are hashed with **bcrypt** (`bcryptjs`, cost factor **10** ≈ 2^10
+rounds). bcrypt is deliberately slow and salt-embedded, making offline
+brute-force and rainbow-table attacks impractical.
+
+- **New registrations** store a `$2a$10$…` / `$2b$10$…` hash (salt inside the
+  hash string — the separate `salt` column only remains for legacy rows).
+- **Legacy accounts** created under the previous scheme (PBKDF2-HMAC-SHA256,
+  100 000 iterations) still log in: `verifyPassword()` detects the hash format
+  and takes the legacy path with a constant-time comparison.
+- **Transparent migration:** after a legacy account's first successful login,
+  the stored hash is re-hashed with bcrypt, so the whole table upgrades
+  organically with zero user action.
+- Wrong passwords are rejected with the same generic
+  `Invalid email or password.` message for both schemes (no user enumeration).
+
+---
+
+## 12. Testing
 
 ```bash
 python3 backend/test_invoices.py
@@ -295,10 +414,17 @@ merge-sort ordering, and deletion removing both the row and the file.
 They run against an isolated temp database + temp uploads directory.
 
 Part C adds explicit product-linking tests plus cookie/session/duplicate tests
-(sections 8–10): upload to a nonexistent product, cross-user re-link rejection,
-HttpOnly cookie login/logout, forged-cookie rejection, per-user duplicate scope
-(case-insensitive, `409` with the existing record, `force` exception, no orphan
-files) — **53 total, all passing** (`npm test` from `backend-node/`).
+(sections 8–10 of the suite). Parts E/OCR/bcrypt add section 11–13: search by
+number/seller/product (case-insensitive, per-user scope), `date_asc`/`date_desc`
+ordering with undated invoices last, search+sort combination, bcrypt prefix +
+cost-factor verification, a synthetic legacy PBKDF2 row logging in and being
+upgraded, OCR field detection on a real Flate-compressed PDF, validation parity
+with upload, `ocr_text` storage/truncation, and the degraded-garbage-image path —
+**90 total, all passing** (`npm test` from `backend-node/`).
+
+Note: tesseract.js downloads its English language data on first use (needs
+internet once); until then image OCR degrades to the manual-entry path while
+PDF OCR keeps working (its extractor uses only Node's built-in `zlib`).
 
 The Python-era suite (`backend/test_invoices.py`) predates these features and is
 kept only as reference for the legacy backend.

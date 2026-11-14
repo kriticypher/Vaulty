@@ -5,11 +5,12 @@
  * transfer format. Validation errors appear instantly with clear messages.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   validateInvoiceFile,
   uploadInvoice,
+  ocrExtract,
   formatFileSize,
   MAX_FILE_SIZE_BYTES
 } from '../services/invoiceService';
@@ -23,11 +24,15 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
   const [serverError, setServerError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [duplicateWarning, setDuplicateWarning] = useState(null); // { existing_invoice }
+  const [ocrNote, setOcrNote] = useState('');
   const [metadata, setMetadata] = useState({
     invoice_number: '',
     seller: '',
     invoice_date: ''
   });
+  // Tracks the latest selected file so a slow OCR pass can't fill the form
+  // for a file the user has already replaced.
+  const latestFileRef = useRef(null);
 
   const clearFileState = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -40,6 +45,8 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     clearFileState();
     setMetadata({ invoice_number: '', seller: '', invoice_date: '' });
     setServerError('');
+    setOcrNote('');
+    latestFileRef.current = null;
   };
 
   const handleFileChange = (event) => {
@@ -64,6 +71,8 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setSelectedFile(file);
     setValidationError('');
+    setOcrNote('');
+    latestFileRef.current = file;
 
     // Preview supported files: images inline, PDFs via the first page icon
     if (file.type === 'image/jpeg' || file.type === 'image/png') {
@@ -71,6 +80,42 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     } else {
       setPreviewUrl('');
     }
+
+    // Part: OCR — ask the backend to read the file's details in the
+    // background and pre-fill the empty fields. Nothing is stored here;
+    // the user reviews/edits everything before uploading.
+    ocrExtract(file)
+      .then((ocr) => {
+        if (latestFileRef.current !== file) return; // stale result
+        const detected = [];
+        setMetadata((prev) => {
+          const updates = { ...prev };
+          if (ocr.invoice_number && !prev.invoice_number) {
+            updates.invoice_number = ocr.invoice_number;
+            detected.push('invoice number');
+          }
+          if (ocr.seller && !prev.seller) {
+            updates.seller = ocr.seller;
+            detected.push('seller');
+          }
+          if (ocr.invoice_date && !prev.invoice_date) {
+            updates.invoice_date = ocr.invoice_date;
+            detected.push('date');
+          }
+          return updates;
+        });
+        if (detected.length > 0) {
+          setOcrNote(`🤖 Auto-filled ${detected.join(', ')} from the file (OCR — ${ocr.engine}). Please verify before uploading.`);
+        } else if (ocr.error) {
+          setOcrNote(`🤖 OCR could not read this file. ${ocr.error}`);
+        } else {
+          setOcrNote('🤖 OCR ran, but no invoice details were detected. Please fill the fields manually.');
+        }
+      })
+      .catch(() => {
+        if (latestFileRef.current !== file) return;
+        setOcrNote('🤖 OCR preview failed. You can still fill the fields manually.');
+      });
   };
 
   const handleUpload = async (event) => {
@@ -186,6 +231,11 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
             />
           </div>
         </div>
+
+        {/* OCR auto-fill note (Part: OCR) — shown after a file is analysed */}
+        {ocrNote && (
+          <p className="upload-note ocr-note">{ocrNote}</p>
+        )}
 
         {productLabel && (
           <p className="upload-target">Uploading for: <strong>{productLabel}</strong></p>

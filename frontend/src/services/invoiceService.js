@@ -86,9 +86,16 @@ export async function uploadInvoice(productId, metadata, file, force = false) {
   });
 }
 
-/** Lists every invoice of the logged-in user across all products. */
-export function getAllInvoices() {
-  return api.get('/api/invoices');
+/** Lists invoices — optional Part E search & sort params. */
+export function getAllInvoices(params = {}) {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== '' && value !== null && value !== undefined) {
+      searchParams.append(key, value);
+    }
+  }
+  const queryString = searchParams.toString();
+  return api.get(`/api/invoices${queryString ? '?' + queryString : ''}`);
 }
 
 /** Lists invoices attached to one product. */
@@ -112,6 +119,20 @@ export function updateInvoice(invoiceId, changes) {
 /** Deletes an invoice record and its stored file. */
 export function deleteInvoice(invoiceId) {
   return api.delete(`/api/invoices/${invoiceId}`);
+}
+
+/**
+ * OCR preview (Part: OCR): sends the selected file to the backend BEFORE
+ * uploading; the server extracts text (PDF via zlib, images via tesseract.js)
+ * and returns detected fields so the form can be auto-filled. Nothing is stored.
+ */
+export async function ocrExtract(file) {
+  const fileData = await fileToBase64(file);
+  const result = await api.post('/api/invoices/ocr-preview', {
+    file_name: file.name,
+    file_data: fileData
+  });
+  return result.ocr || {};
 }
 
 /**
