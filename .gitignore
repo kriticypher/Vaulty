@@ -13,6 +13,10 @@ __pycache__/
 database/*.db
 *.sqlite3
 
+# Member 2: uploaded invoice files (never commit user documents)
+backend/uploads/
+backend-node/uploads/
+
 # Build outputs
 dist/
 build/
@@ -21,3 +25,5 @@ frontend/dist/
 # OS files
 .DS_Store
 Thumbs.db
+
+mychanges.md

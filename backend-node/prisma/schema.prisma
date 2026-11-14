@@ -1,0 +1,98 @@
+// prisma/schema.prisma - Shared Vaultly database schema (Node.js + Prisma).
+// Mirrors the exact tables Member 1 created in SQLite, so the same
+// database/vaultly.db file keeps serving every team member.
+// Field names intentionally keep the snake_case API names so the JSON
+// responses stay identical for the existing React frontend.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../database/vaultly.db"
+}
+
+// ── Member 1: Authentication ─────────────────────────────────────────────────
+model Users {
+  user_id       Int        @id @default(autoincrement())
+  name          String
+  email         String     @unique
+  password_hash String
+  salt          String
+  created_at    DateTime   @default(now())
+  products      Products[]
+}
+
+// ── Member 1: Product Management ─────────────────────────────────────────────
+model Products {
+  product_id    Int              @id @default(autoincrement())
+  user_id       Int
+  name          String
+  brand         String?
+  category      String?
+  price         Float
+  purchase_date String           // Format: YYYY-MM-DD (kept as string like Member 1)
+  description   String?
+  created_at    DateTime         @default(now())
+  user          Users            @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  invoices      Invoices[]
+  warranties    Warranties[]
+  returns       Returns[]
+  services      ServiceRecords[]
+
+  @@index([user_id])
+}
+
+// ── Member 2: Invoice Management ─────────────────────────────────────────────
+model Invoices {
+  invoice_id        Int      @id @default(autoincrement())
+  product_id        Int
+  invoice_number    String?
+  seller            String?
+  invoice_date      String?  // Format: YYYY-MM-DD (kept as string like Member 1)
+  file_path         String   // relative to backend uploads dir, e.g. "u1/invoice_u1_p2_...png"
+  original_filename String?
+  file_size         Int?
+  mime_type         String?
+  uploaded_at       DateTime @default(now())
+  product           Products @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
+
+  @@index([product_id])
+}
+
+// ── Member 3: Warranty Management (schema hook, owned by Member 3) ───────────
+model Warranties {
+  warranty_id     Int      @id @default(autoincrement())
+  product_id      Int
+  start_date      String
+  duration_months Int
+  expiry_date     String
+  product         Products @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
+
+  @@index([product_id])
+}
+
+// ── Member 3: Return Tracking (schema hook, owned by Member 3) ───────────────
+model Returns {
+  return_id      Int      @id @default(autoincrement())
+  product_id     Int
+  return_deadline String
+  return_status  String   @default("Pending")
+  product        Products @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
+
+  @@index([product_id])
+}
+
+// ── Member 3: Service History (schema hook, owned by Member 3) ───────────────
+model ServiceRecords {
+  service_id     Int      @id @default(autoincrement())
+  product_id     Int
+  service_date   String
+  service_center String?
+  cost           Float?
+  description    String?
+  product        Products @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
+
+  @@index([product_id])
+}

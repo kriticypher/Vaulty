@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import AddProduct from './pages/AddProduct';
 import ProductDetails from './pages/ProductDetails';
+import Invoices from './pages/Invoices';
+import InvoiceDetails from './pages/InvoiceDetails';
 import Analytics from './pages/Analytics';
 import Profile from './pages/Profile';
 import PlaceholderPage from './pages/PlaceholderPage';
@@ -66,24 +68,11 @@ export default function App() {
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/profile" element={<Profile user={user} />} />
 
-              {/* Shared integration placeholder routes for Members 2 & 3 */}
-              <Route
-                path="/invoices"
-                element={
-                  <PlaceholderPage
-                    title="Invoices & Receipts"
-                    member="Member 2 (Invoices & OCR)"
-                    description="Upload, preview, parse, and detect duplicate invoices and receipts."
-                    plannedFeatures={[
-                      'Invoice file upload (PDF, PNG, JPG)',
-                      'OCR automated data extraction',
-                      'Side-by-side document preview',
-                      'Duplicate receipt detection',
-                      'CSV purchase export'
-                    ]}
-                  />
-                }
-              />
+              {/* Member 2: Invoices & Receipts (replaces the integration placeholder) */}
+              <Route path="/invoices" element={<Invoices />} />
+              <Route path="/invoices/:id" element={<InvoiceDetails />} />
+
+              {/* Shared integration placeholder routes for Member 3 */}
               <Route
                 path="/warranties"
                 element={

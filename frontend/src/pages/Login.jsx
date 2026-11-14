@@ -33,7 +33,7 @@ export default function Login({ onLogin }) {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-header">
-          <div className="auth-logo">🔐</div>
+          <img src="/vaulty-logo.png" alt="Vaultly logo" className="auth-logo-img" />
           <h1>Vaultly</h1>
           <p>Smart Purchase, Invoice, Warranty & Return Management</p>
         </div>

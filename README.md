@@ -9,24 +9,31 @@ A modern, minimal, full-stack web application designed for students and professi
 
 ## 🛠️ Technology Stack
 - **Frontend**: React (Vite), HTML5, CSS3, JavaScript (Fetch API, React Router DOM)
-- **Backend**: Python 3 standard library (`http.server`, `sqlite3`, `hashlib`, `secrets`, `json`) — zero external dependencies.
-- **Database**: SQLite 3 with strict foreign key constraints.
-- **Academic Concepts**: DSA & ADA (Merge Sort, Linear Search, Hash Map / Dictionary Lookups).
+- **Backend**: Node.js (Express 5) + Prisma ORM + SQLite — `backend-node/` (current, Member 2 migration)
+- **Backend (legacy reference)**: Python 3 standard library (`http.server`, `sqlite3`) — `backend/` kept until the team confirms removal
+- **Database**: SQLite 3 (`database/vaultly.db`, shared by both backends) with strict foreign-key cascades
+- **Academic Concepts**: DSA & ADA (Merge Sort, Linear Search, Hash Map / Dictionary Lookups — hand-written in both `products.py` and `backend-node/src/dsa.js`)
 
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
-- Python 3.8+
 - Node.js 18+ and npm
 
 ### 2. Run the Backend (Port 8000)
 ```bash
-cd backend
-python3 server.py
+cd backend-node
+npm install
+npx prisma db push   # creates/updates database/vaultly.db from prisma/schema.prisma
+npm start
 ```
-*Initializes SQLite database automatically at `database/vaultly.db`.*
 
-### 3. Run the Frontend (Port 5173)
+### 3. Run the Backend Tests
+```bash
+cd backend-node
+npm test   # 36 end-to-end checks (auth, products, DSA, invoice upload security, CRUD, dashboard)
+```
+
+### 4. Run the Frontend (Port 5173)
 ```bash
 cd frontend
 npm install

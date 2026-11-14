@@ -60,7 +60,7 @@ export default function Register({ onLogin }) {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-header">
-          <div className="auth-logo">🔐</div>
+          <img src="/vaulty-logo.png" alt="Vaultly logo" className="auth-logo-img" />
           <h1>Create an Account</h1>
           <p>Join Vaultly to organize products, warranties & receipts</p>
         </div>

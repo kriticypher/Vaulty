@@ -581,3 +581,282 @@ body {
   flex: 1;
   min-width: 220px;
 }
+
+/* ==========================================================================
+   Vaultly - Member 2: Invoice Upload & Document Management
+   ========================================================================== */
+
+/* ── Upload Dropzone ────────────────────────────────────────────────────── */
+.upload-dropzone {
+  display: block;
+  border: 2px dashed var(--border-focus);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-page);
+  padding: 1.25rem;
+  cursor: pointer;
+  transition: var(--transition);
+  margin-bottom: 1rem;
+}
+
+.upload-dropzone:hover {
+  border-color: var(--primary);
+  background-color: var(--primary-light);
+}
+
+.upload-dropzone.dropzone-error {
+  border-color: var(--danger);
+  background-color: var(--danger-bg);
+}
+
+.upload-dropzone input[type="file"] {
+  display: none;
+}
+
+.dropzone-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.dropzone-hint strong {
+  color: var(--text-main);
+  font-size: 0.95rem;
+}
+
+.dropzone-icon {
+  font-size: 1.75rem;
+}
+
+/* ── Selected File Chip (name + size + preview thumbnail) ───────────────── */
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+}
+
+.file-chip-thumb {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.file-chip-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.file-chip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.file-chip-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-chip-size {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.file-chip-replace {
+  font-size: 0.8rem;
+  color: var(--primary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* ── Upload Form Extras ─────────────────────────────────────────────────── */
+.upload-meta {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.upload-meta-compact {
+  grid-template-columns: 1fr;
+}
+
+.upload-target {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.upload-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+}
+
+.upload-message {
+  font-size: 0.88rem;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.upload-message-error {
+  background-color: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid #fecaca;
+}
+
+.upload-message-success {
+  background-color: var(--success-bg);
+  color: var(--success);
+  border: 1px solid #a7f3d0;
+}
+
+/* ── Saved Invoice Rows ─────────────────────────────────────────────────── */
+.invoice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.invoice-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  background-color: #ffffff;
+  transition: var(--transition);
+}
+
+.invoice-item:hover {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-sm);
+}
+
+.invoice-item-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.invoice-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.invoice-item-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.invoice-item-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.invoice-item-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+/* ── Member 2: Invoice Details Page ─────────────────────────────────────── */
+.invoice-detail-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.invoice-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.invoice-detail-row:last-child {
+  border-bottom: none;
+}
+
+.invoice-detail-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.invoice-detail-value {
+  font-weight: 600;
+  font-size: 0.92rem;
+  text-align: right;
+  word-break: break-word;
+}
+
+.invoice-detail-link {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.invoice-detail-link:hover {
+  text-decoration: underline;
+}
+
+.invoice-detail-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.invoice-item-link {
+  color: var(--text-main);
+  text-decoration: none;
+}
+
+.invoice-item-link:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* ── Member 2: Vaultly Logo (public/vaulty-logo.png) ────────────────────── */
+.brand-logo-img {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+
+.auth-logo-img {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  margin-bottom: 0.5rem;
+}
