@@ -136,10 +136,28 @@ export async function ocrExtract(file) {
 }
 
 /**
+ * Android WebView support: inside the native wrapper (android/), blob downloads
+ * and window.open previews don't work. MainActivity injects a small
+ * `window.VaultlyAndroid` bridge whose download() hands the URL to Android's
+ * DownloadManager (the session cookie is attached natively). In a normal
+ * browser this helper is a no-op and the blob/anchor path is used.
+ */
+function nativeDownload(url, filename) {
+  const bridge = typeof window !== 'undefined' ? window.VaultlyAndroid : null;
+  if (bridge && typeof bridge.download === 'function') {
+    bridge.download(url, filename);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Part F: downloads the logged-in user's invoices as a CSV file
  * (GET /api/invoices/export streams text/csv with an attachment header).
  */
 export async function downloadInvoicesCsv() {
+  // Android WebView: let the native shell handle the download.
+  if (nativeDownload(`${API_BASE}/api/invoices/export`, 'vaultly-invoices.csv')) return;
   const token = localStorage.getItem('vaultly_token') || '';
   const response = await fetch(`${API_BASE}/api/invoices/export`, {
     method: 'GET',
@@ -198,6 +216,10 @@ export async function fetchInvoiceBlob(invoiceId) {
 
 /** Downloads the invoice with its original file name. */
 export async function downloadInvoice(invoice) {
+  // Android WebView: native DownloadManager fetches it with the session cookie.
+  if (nativeDownload(
+        `${API_BASE}/api/invoices/${invoice.invoice_id}/download`,
+        invoice.original_filename || 'invoice')) return;
   const blob = await fetchInvoiceBlob(invoice.invoice_id);
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -211,6 +233,11 @@ export async function downloadInvoice(invoice) {
 
 /** Opens the invoice (image or PDF) in a new tab for preview. */
 export async function previewInvoice(invoice) {
+  // Android WebView: blob URLs can't be opened in a separate viewer here, so
+  // the file is saved to Downloads instead (the user can open it from there).
+  if (nativeDownload(
+        `${API_BASE}/api/invoices/${invoice.invoice_id}/download`,
+        invoice.original_filename || 'invoice')) return;
   const blob = await fetchInvoiceBlob(invoice.invoice_id);
   const url = URL.createObjectURL(blob);
   window.open(url, '_blank');

@@ -3,7 +3,15 @@
  * Handles HTTP requests, Authorization Bearer token injection, and JSON responses.
  */
 
-const API_BASE = 'http://localhost:8000';
+// API host resolution:
+//  • Desktop browser: page is served from http://localhost:5173 → API = localhost:8000.
+//  • Android WebView (emulator): page loads from http://10.0.2.2:5173 → 10.0.2.2:8000.
+//  • Android WebView (real device with `adb reverse`): page loads from
+//    http://localhost:5173 → localhost:8000, forwarded to the laptop.
+// Using the page's own host keeps the frontend and backend on the same machine
+// in every environment — no hardcoded addresses anywhere.
+const API_HOST = (typeof location !== 'undefined' && location.hostname) ? location.hostname : 'localhost';
+const API_BASE = `http://${API_HOST}:8000`;
 
 export { API_BASE };
 

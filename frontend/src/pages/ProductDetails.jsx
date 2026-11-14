@@ -154,7 +154,7 @@ export default function ProductDetails() {
                 required
               />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="grid-2">
               <div className="form-group">
                 <label>Brand</label>
                 <input
@@ -172,7 +172,7 @@ export default function ProductDetails() {
                 />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="grid-2">
               <div className="form-group">
                 <label>Price (₹)</label>
                 <input

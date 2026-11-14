@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive-icon foreground = the actual Vaultly logo, redrawn as vectors.
+  Geometry and colors are identical to frontend/scripts/generate-logo.mjs:
+    navy background #0f172a, cobalt outer ring #2563eb (annulus r60..80),
+    accent #60a5fa inner ring (r36..42), 8 spokes (r14..58, width 8), hub (r16).
+  The group scales content to 92% so the ring stays inside the adaptive-icon
+  safe zone (66/108 of the canvas) on circular launcher masks.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+
+    <group
+        android:scaleX="0.92"
+        android:scaleY="0.92"
+        android:pivotX="128"
+        android:pivotY="128">
+
+        <!-- Outer vault ring: annulus r=80..60, cobalt -->
+        <path
+            android:fillColor="#2563EB"
+            android:fillType="evenOdd"
+            android:pathData="M128,48 C172.2,48 208,75.8 208,128 C208,180.2 172.2,208 128,208 C83.8,208 48,180.2 48,128 C48,75.8 83.8,48 128,48 Z
+                             M128,68 C161.1,68 188,94.9 188,128 C188,161.1 161.1,188 128,188 C94.9,188 68,161.1 68,128 C68,94.9 94.9,68 128,68 Z" />
+
+        <!-- Inner accent ring: annulus r=42..36 -->
+        <path
+            android:fillColor="#60A5FA"
+            android:fillType="evenOdd"
+            android:pathData="M128,86 C151.2,86 170,104.8 170,128 C170,151.2 151.2,170 128,170 C104.8,170 86,151.2 86,128 C86,104.8 104.8,86 128,86 Z
+                             M128,92 C147.9,92 164,108.1 164,128 C164,147.9 147.9,164 128,164 C108.1,164 92,147.9 92,128 C92,108.1 108.1,92 128,92 Z" />
+
+        <!-- 8 vault-wheel spokes (45° apart, from r=14 to r=58, width 8) -->
+        <path
+            android:fillColor="#60A5FA"
+            android:pathData="M142,132 L186,132 L186,124 L142,124 Z M135.1,140.7 L166.2,171.8 L171.8,166.2 L140.7,135.1 Z M124,142 L124,186 L132,186 L132,142 Z M115.3,135.1 L84.2,166.2 L89.8,171.8 L120.9,140.7 Z M114,124 L70,124 L70,132 L114,132 Z M120.9,115.3 L89.8,84.2 L84.2,89.8 L115.3,120.9 Z M132,114 L132,70 L124,70 L124,114 Z M140.7,120.9 L171.8,89.8 L166.2,84.2 L135.1,115.3 Z" />
+
+        <!-- Center hub: disc r=16 -->
+        <path
+            android:fillColor="#60A5FA"
+            android:pathData="M128,112 C136.8,112 144,119.2 144,128 C144,136.8 136.8,144 128,144 C119.2,144 112,136.8 112,128 C112,119.2 119.2,112 128,112 Z" />
+    </group>
+</vector>
