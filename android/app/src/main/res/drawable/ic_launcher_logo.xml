@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher icon artwork = the ACTUAL Vaultly logo file
+  (frontend/public/vaulty-logo.png, copied to mipmap-xxxhdpi/ic_logo_full.png).
+  The bitmap is inset 4dp inside the 108dp adaptive-icon canvas (~93% scale)
+  so the vault wheel stays inside the launcher's circular safe zone; the navy
+  base colour matches the logo's own background (#0F172A), so the tile blends
+  seamlessly into the icon background.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/ic_launcher_background" />
+    <item
+        android:left="4dp"
+        android:top="4dp"
+        android:right="4dp"
+        android:bottom="4dp">
+        <bitmap
+            android:src="@mipmap/ic_logo_full"
+            android:gravity="fill" />
+    </item>
+</layer-list>

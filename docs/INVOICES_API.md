@@ -1,5 +1,39 @@
 # Vaultly Invoice Module Documentation (Member 2 - Invoices & Documents)
 
+## 0. Part H — Required API Endpoint Map
+
+All endpoints below live under Member 1's authentication (`getUserIdFromRequest`
+in `src/auth.js` — same HttpOnly cookie session + Bearer token as every other
+module; **no separate auth system**). Every one verifies record ownership
+through the `product.user_id` scope, validates input, and never returns
+another user's invoice data (a foreign ID is `404` on reads / `400` with
+"Not found or access denied." on writes, matching the product routes).
+
+| Required endpoint | Status | Notes |
+| --- | --- | --- |
+| `GET /api/invoices` | ✅ | Supports `?search=`, `?field=`, `?sort=` (Part E) |
+| `POST /api/invoices` | ✅ | Create: `product_id`, `file_name`, `file_data` (Base64) in the JSON body |
+| `GET /api/invoices/:id` | ✅ | Full detail record |
+| `PUT /api/invoices/:id` | ✅ | Edit `invoice_number` / `seller` / `invoice_date` / `product_id` |
+| `DELETE /api/invoices/:id` | ✅ | Removes the record **and** the stored file |
+| `POST /api/invoices/upload` | ✅ | File upload + auto-create — identical to `POST /api/invoices` (the file arrives Base64 inside the create payload, per the shared transfer format) |
+| `GET /api/invoices/:id/file` | ✅ | Inline preview (verified PDF/image types only; `?download=1` forces attachment) |
+| `GET /api/invoices/:id/download` | ✅ | Attachment download with the original filename |
+| `GET /api/invoices/export/csv` | ✅ | Part F CSV export; `/api/invoices/export` returns byte-identical output |
+
+The original product-scoped routes (`GET/POST /api/products/:id/invoices`)
+are kept — the frontend product pages use them — and behave identically.
+
+### Response format conventions (same as Member 1 / Member 3)
+
+- Success: `200`/`201` with `{ success?: true, message?, invoice?, invoices? }`
+- Client error: `400` with `{ success: false, error: "…" }` (or `{ error }` on reads)
+- Not owned / not found: `404` `{ error: "Invoice not found or access denied." }`
+- Unauthenticated: `401` `{ error: "Authentication required. Please login." }`
+- Duplicate file: `409` with `{ success: false, duplicate: true, duplicate_reason, error, existing }`
+- Oversized upload: `413` (7 MB body cap ≈ 5 MB file)
+
+
 **Module Owner:** Member 2
 **Depends on:** Member 1's authentication, shared SQLite database and product table
 
