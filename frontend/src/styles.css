@@ -23,13 +23,20 @@
   --warning-bg: #fffbeb;
   --danger: #ef4444;
   --danger-bg: #fef2f2;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 12px 20px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.03);
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --touch-target: 36px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --touch-target: 44px;
+  }
 }
 
 * {
@@ -38,12 +45,24 @@
   padding: 0;
 }
 
+html, body {
+  min-height: 100dvh;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: var(--bg-page);
   color: var(--text-main);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  text-wrap: balance;
+}
+
+p, li {
+  text-wrap: pretty;
 }
 
 /* ── App Layout ─────────────────────────────────────────────────────────── */
@@ -59,11 +78,42 @@ body {
   max-width: 1300px;
 }
 
-@media (max-width: 900px) {
-  .main-content {
-    margin-left: 0;
-    padding: 1.5rem;
-  }
+/* ── Mobile / small-screen layout (Android WebView, phones) ─────────────── */
+/* NOTE: the @media overrides live at the END of this file so they win the
+   cascade against every component rule above (same specificity → last wins). */
+
+/* Shared responsive grid helpers (desktop = current behaviour). */
+.form-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(140px, 1fr) minmax(150px, 1fr) minmax(130px, auto);
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.grid-sidebar {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.invoices-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ── Sidebar Navigation ─────────────────────────────────────────────────── */
@@ -370,6 +420,8 @@ body {
   cursor: pointer;
   transition: var(--transition);
   text-decoration: none;
+  min-height: var(--touch-target);
+  touch-action: manipulation;
 }
 
 .btn-primary {
@@ -434,6 +486,7 @@ body {
   background-color: #ffffff;
   outline: none;
   transition: var(--transition);
+  min-height: var(--touch-target);
 }
 
 .form-control:focus {
@@ -916,4 +969,167 @@ body {
   border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
   font-size: 0.82rem;
+}
+
+/* ==========================================================================
+   MOBILE / SMALL-SCREEN OVERRIDES — must stay at the END of the file.
+   Every rule here has equal specificity to a desktop rule above, so last
+   declaration wins the cascade. Keep new responsive overrides down here.
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  /* Sidebar becomes a compact top bar: brand + scrollable nav + logout with safe area padding. */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    padding-top: max(0.4rem, env(safe-area-inset-top, 0px));
+    padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+    padding-bottom: 0.4rem;
+    gap: 0.35rem;
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(8px);
+    background-color: rgba(30, 41, 59, 0.96);
+  }
+
+  .sidebar-brand {
+    padding: 0.25rem 0.5rem;
+    gap: 0.45rem;
+    border-bottom: none;
+    flex-shrink: 0;
+  }
+
+  .brand-name {
+    font-size: 1.05rem;
+  }
+
+  .sidebar-user {
+    display: none; /* name/email live on the Profile page on mobile */
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0.25rem;
+    gap: 0.3rem;
+    scrollbar-width: none; /* Firefox */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sidebar-link {
+    padding: 0.5rem 0.75rem;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: var(--touch-target);
+  }
+
+  .sidebar-logout {
+    padding: 0.5rem 0.75rem;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    border-top: none;
+    flex-shrink: 0;
+    min-height: var(--touch-target);
+  }
+
+  .main-content {
+    margin-left: 0;
+    margin-top: calc(58px + env(safe-area-inset-top, 0px));
+    padding: 1.15rem;
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+    max-width: 100%;
+    width: 100%;
+  }
+
+  /* Page grids stack vertically on phones. */
+  .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .grid-2,
+  .grid-sidebar,
+  .invoices-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+
+  .stat-card {
+    padding: 1.1rem;
+    gap: 0.85rem;
+  }
+
+  .stat-icon {
+    width: 44px;
+    height: 44px;
+    font-size: 1.35rem;
+  }
+
+  .stat-value {
+    font-size: 1.35rem;
+  }
+
+  .card {
+    padding: 1.15rem;
+  }
+
+  .table th, .table td {
+    padding: 0.75rem 0.85rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header {
+    margin-bottom: 1.25rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .page-header .btn {
+    width: 100%;
+  }
+
+  .page-title {
+    font-size: 1.45rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-name {
+    display: none; /* logo alone on very narrow screens */
+  }
+
+  .main-content {
+    margin-top: calc(54px + env(safe-area-inset-top, 0px));
+    padding: 0.85rem;
+  }
 }

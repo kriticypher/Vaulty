@@ -100,7 +100,7 @@ export default function AddProduct() {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div className="grid-2">
             <div className="form-group">
               <label htmlFor="brand">Brand / Manufacturer</label>
               <input
@@ -132,7 +132,7 @@ export default function AddProduct() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div className="grid-2">
             <div className="form-group">
               <label htmlFor="price">Purchase Price (₹) *</label>
               <input

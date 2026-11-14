@@ -102,7 +102,7 @@ export default function Invoices() {
 
       {/* Part E: Search & Sort controls */}
       <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 2fr) minmax(140px, 1fr) minmax(150px, 1fr) minmax(130px, auto)', gap: '0.75rem', alignItems: 'end' }}>
+        <div className="form-grid">
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label>Search Invoices</label>
             <input
@@ -164,7 +164,7 @@ export default function Invoices() {
         <StatCard icon="📦" label="Products Available" value={products.length} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 420px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
+      <div className="invoices-layout">
         {/* Upload panel */}
         <div className="card">
           <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>

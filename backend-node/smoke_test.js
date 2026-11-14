@@ -630,6 +630,62 @@ check('Seller with comma/quotes is properly quoted ("Acme, Inc. ""Premier""")',
 const columnCounts = csvLines.map((l) => (l.match(/("(?:[^"]|"")*"|[^,]*)(,|$)/g) || []).length);
 check('Every CSV row has the same number of columns', new Set(columnCounts).size === 1, `sizes=${[...new Set(columnCounts)].join(',')}`);
 
+// ── 15. PART H: canonical endpoint set (aliases + file access) ───────────────
+console.log('\n15. Part H API Integration Tests:');
+// POST /api/invoices + /api/invoices/upload — create with product_id in the body.
+const hBody = (seed, extra = {}) => ({
+  token: tokenA,
+  body: { product_id: productsA[2], file_name: 'part-h.png', file_data: b64(pngVariant(400 + seed)), ...extra }
+});
+const hViaInvoices = await json('POST', '/api/invoices', hBody(1, { invoice_number: 'PARTH-1', seller: 'Part H Seller' }));
+check('POST /api/invoices creates an invoice (201)', hViaInvoices.status === 201 && hViaInvoices.data.invoice?.invoice_id > 0, JSON.stringify(hViaInvoices.data).slice(0, 120));
+if (hViaInvoices.data.invoice?.file_path) createdInvoiceFiles.push(hViaInvoices.data.invoice.file_path);
+
+const hViaUpload = await json('POST', '/api/invoices/upload', hBody(2, { invoice_number: 'PARTH-2' }));
+check('POST /api/invoices/upload creates an invoice (201)', hViaUpload.status === 201 && hViaUpload.data.invoice?.invoice_id > 0, JSON.stringify(hViaUpload.data).slice(0, 120));
+if (hViaUpload.data.invoice?.file_path) createdInvoiceFiles.push(hViaUpload.data.invoice.file_path);
+
+const hNoProduct = await json('POST', '/api/invoices', { token: tokenA, body: { file_name: 'x.png', file_data: b64(pngVariant(409)) } });
+check('POST /api/invoices without product_id is 400', hNoProduct.status === 400, JSON.stringify(hNoProduct.data));
+
+const hForeign = await json('POST', '/api/invoices', { token: tokenB, body: { product_id: productsA[2], file_name: 'x.png', file_data: b64(pngVariant(410)) } });
+check("POST /api/invoices with another user's product_id is rejected (same convention as the product-scoped route)", hForeign.status === 400 && /not found or access denied/i.test(hForeign.data.error || ''), JSON.stringify(hForeign.data).slice(0, 120));
+
+const hNoAuth = await json('POST', '/api/invoices', { body: { product_id: productsA[2], file_name: 'x.png', file_data: b64(pngVariant(411)) } });
+check('POST /api/invoices requires authentication (401)', hNoAuth.status === 401, `status=${hNoAuth.status}`);
+
+// Duplicate detection applies to the canonical endpoints too.
+const hDup = await json('POST', '/api/invoices', { token: tokenA, body: { product_id: productsA[2], file_name: 'part-h.png', file_data: b64(pngVariant(401)) } });
+check('POST /api/invoices duplicate file is 409', hDup.status === 409, `status=${hDup.status}`);
+
+// GET /api/invoices/:id/file — inline preview of the stored file.
+const hFileRes = await fetch(`${base()}/api/invoices/${hViaInvoices.data.invoice_id}/file`, { headers: { Authorization: `Bearer ${tokenA}` } });
+const hFileBytes = Buffer.from(await hFileRes.arrayBuffer());
+check('GET /api/invoices/:id/file streams the file (200, inline disposition)',
+      hFileRes.status === 200 &&
+      (hFileRes.headers.get('content-disposition') || '').startsWith('inline') &&
+      (hFileRes.headers.get('content-type') || '').startsWith('image/png') &&
+      hFileBytes.equals(pngVariant(401)),
+      `status=${hFileRes.status} cd=${hFileRes.headers.get('content-disposition')}`);
+
+const hFileB = await fetch(`${base()}/api/invoices/${hViaInvoices.data.invoice_id}/file`, { headers: { Authorization: `Bearer ${tokenB}` } });
+check("GET /api/invoices/:id/file never leaks another user's invoice (404)", hFileB.status === 404, `status=${hFileB.status}`);
+
+const hFileNoAuth = await fetch(`${base()}/api/invoices/${hViaInvoices.data.invoice_id}/file`);
+check('GET /api/invoices/:id/file requires authentication (401)', hFileNoAuth.status === 401, `status=${hFileNoAuth.status}`);
+
+// ?download=1 forces attachment from the /file path.
+const hFileDl = await fetch(`${base()}/api/invoices/${hViaInvoices.data.invoice_id}/file?download=1`, { headers: { Authorization: `Bearer ${tokenA}` } });
+check('GET /api/invoices/:id/file?download=1 switches to attachment', (hFileDl.headers.get('content-disposition') || '').startsWith('attachment'), hFileDl.headers.get('content-disposition'));
+
+// GET /api/invoices/export/csv — canonical Part F path, identical output.
+const hCsvA = await fetch(`${base()}/api/invoices/export`, { headers: { Authorization: `Bearer ${tokenA}` } });
+const hCsvB = await fetch(`${base()}/api/invoices/export/csv`, { headers: { Authorization: `Bearer ${tokenA}` } });
+check('GET /api/invoices/export/csv returns the same CSV as /invoices/export',
+      hCsvB.status === 200 && (await hCsvB.text()) === (await hCsvA.text()), `status=${hCsvB.status}`);
+const hCsvNoAuth = await fetch(`${base()}/api/invoices/export/csv`);
+check('GET /api/invoices/export/csv requires authentication (401)', hCsvNoAuth.status === 401, `status=${hCsvNoAuth.status}`);
+
 // ── CLEANUP: remove test users (cascades products/invoices) + stray files ────
 for (const filePath of createdInvoiceFiles) {
   const abs = path.join(UPLOAD_DIR, filePath);

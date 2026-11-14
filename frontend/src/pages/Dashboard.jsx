@@ -147,7 +147,7 @@ export default function Dashboard() {
       )}
 
       {/* Middle Section: Recently Added Products & Category Breakdown */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
+      <div className="grid-sidebar" style={{ marginBottom: '2rem' }}>
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>Recently Added Products</h2>

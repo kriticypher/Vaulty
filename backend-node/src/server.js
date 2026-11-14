@@ -25,15 +25,27 @@ const app = express();
 app.use(express.json({ limit: '7mb' }));
 
 // ── CORS for local development with React/Vite (no extra dependency) ─────────
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': 'http://localhost:5173',
+// Allow-list of development origins. Beyond the normal browser at
+// localhost:5173, the Android emulator loads the page from 10.0.2.2:5173
+// (the emulator's alias for the host machine's loopback).
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://10.0.2.2:5173'
+]);
+const CORS_DEFAULTS = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Allow-Credentials': 'true'
 };
 app.use((req, res, next) => {
-  for (const [header, value] of Object.entries(CORS_HEADERS)) {
+  for (const [header, value] of Object.entries(CORS_DEFAULTS)) {
     res.setHeader(header, value);
+  }
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
   }
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
@@ -90,6 +102,25 @@ if (invokedDirectly) {
     console.log(` Vaultly Backend Server (Node.js + Prisma) running on http://localhost:${PORT}`);
     console.log(' Ready to accept requests from the React frontend.');
     console.log('=======================================================\n');
+  }).on('error', (err) => {
+    // The most common cause of "the server just stops": an older copy of the
+    // backend is still running and holding port 8000. Explain it clearly.
+    if (err.code === 'EADDRINUSE') {
+      console.error(`
+=======================================================
+ ERROR: Port ${PORT} is already in use.
+ Another Vaultly backend (or another program) is still
+ running on this port.
+
+ Fix:
+   • Close the other terminal running the server, or
+   • kill the process holding the port:
+       kill $(lsof -ti :${PORT})
+ then start the server again.
+=======================================================\n`);
+      process.exit(1);
+    }
+    throw err;
   });
 }
 
