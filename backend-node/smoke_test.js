@@ -48,6 +48,9 @@ async function json(method, urlPath, { token, body } = {}) {
 }
 
 const PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(80)]);
+// Distinct-yet-valid PNG variants: identical bytes now COUNT as duplicates,
+// so each stored upload must use different content.
+const pngVariant = (seed) => Buffer.concat([PNG_BYTES, Buffer.from([seed & 0xff])]);
 const PDF_BYTES = Buffer.concat([Buffer.from('%PDF-1.4\n', 'latin1'), Buffer.alloc(80)]);
 const b64 = (buf) => buf.toString('base64');
 
@@ -115,7 +118,7 @@ check('Product details include linked record arrays', ['product', 'invoices', 'w
 console.log('\n3. Invoice Upload Tests:');
 const up = await json('POST', `/api/products/${productsA[0]}/invoices`, {
   token: tokenA,
-  body: { file_name: 'receipt photo.PNG', file_data: b64(PNG_BYTES), invoice_number: 'INV-1', seller: 'Amazon' }
+  body: { file_name: 'receipt photo.PNG', file_data: b64(pngVariant(1)), invoice_number: 'INV-1', seller: 'Amazon' }
 });
 check('Valid PNG upload (201)', up.status === 201 && up.data.success === true, JSON.stringify(up.data));
 const invoiceId = up.data.invoice_id;
@@ -138,7 +141,7 @@ check('Oversized upload rejected with 413 + friendly message', oversize.status =
 const traversal = await json('POST', `/api/products/${productsA[0]}/invoices`, { token: tokenA, body: { file_name: '../../database/vaultly.db', file_data: b64(PDF_BYTES) } });
 check('Path traversal name rejected (.db not whitelisted)', traversal.status === 400, JSON.stringify(traversal.data));
 
-const crossUpload = await json('POST', `/api/products/${productsA[0]}/invoices`, { token: tokenB, body: { file_name: 'hijack.png', file_data: b64(PNG_BYTES) } });
+const crossUpload = await json('POST', `/api/products/${productsA[0]}/invoices`, { token: tokenB, body: { file_name: 'hijack.png', file_data: b64(pngVariant(201)) } });
 check('User B cannot upload to User A product', crossUpload.status === 400, JSON.stringify(crossUpload.data));
 
 // ── 4. INVOICE DETAILS / EDIT (Part B) ───────────────────────────────────────
@@ -165,7 +168,7 @@ check('Foreign user cannot open invoice details', crossRead.status === 404, JSON
 console.log('\n5. Download Tests:');
 const dl = await fetch(`${base()}/api/invoices/${invoiceId}/download`, { headers: { Authorization: `Bearer ${tokenA}` } });
 const dlBytes = Buffer.from(await dl.arrayBuffer());
-check('Download streams the stored bytes', dl.status === 200 && dlBytes.length === PNG_BYTES.length, `status=${dl.status} len=${dlBytes.length}`);
+check('Download streams the stored bytes', dl.status === 200 && dlBytes.length === pngVariant(1).length, `status=${dl.status} len=${dlBytes.length}`);
 check('Security headers present (nosniff + attachment)', dl.headers.get('x-content-type-options') === 'nosniff' && (dl.headers.get('content-disposition') || '').startsWith('attachment'), JSON.stringify(dl.headers.get('content-disposition')));
 
 const foreignDl = await fetch(`${base()}/api/invoices/${invoiceId}/download`, { headers: { Authorization: `Bearer ${tokenB}` } });
@@ -198,14 +201,14 @@ check('Owner deletes product', delProduct.status === 200, JSON.stringify(delProd
 console.log('\n8. Product Linking Tests:');
 const noProduct = await json('POST', '/api/products/999999/invoices', {
   token: tokenA,
-  body: { file_name: 'orphan.png', file_data: b64(PNG_BYTES) }
+  body: { file_name: 'orphan.png', file_data: b64(pngVariant(202)) }
 });
 check('Upload to a NON-EXISTENT product is rejected', noProduct.status === 400 && /not found or access denied/i.test(noProduct.data.error || ''), JSON.stringify(noProduct.data));
 
 const prodB = await json('POST', '/api/products', { token: tokenB, body: { name: 'Bob Product', price: 50, purchase_date: '2026-02-02' } });
 const linkInvoice = await json('POST', `/api/products/${productsA[1]}/invoices`, {
   token: tokenA,
-  body: { file_name: 'link.png', file_data: b64(PNG_BYTES) }
+  body: { file_name: 'link.png', file_data: b64(pngVariant(203)) }
 });
 check('Invoice created linked to own product', linkInvoice.status === 201 && linkInvoice.data.invoice.product_id === productsA[1], JSON.stringify(linkInvoice.data));
 createdInvoiceFiles.push(linkInvoice.data.invoice.file_path);
@@ -256,7 +259,7 @@ check('Session token invalid after logout', meAfterLogout.status === 401, `statu
 console.log('\n10. Duplicate Detection Tests:');
 const dupUpload = await json('POST', `/api/products/${productsA[1]}/invoices`, {
   token: tokenA,
-  body: { file_name: 'first.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
+  body: { file_name: 'first.png', file_data: b64(pngVariant(10)), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
 });
 check('First invoice with seller+number saves', dupUpload.status === 201, JSON.stringify(dupUpload.data));
 createdInvoiceFiles.push(dupUpload.data.invoice.file_path);
@@ -267,7 +270,7 @@ const fileCountBefore = (await fsp.readdir(userUploadsDir)).length;
 
 const dupRepeat = await json('POST', `/api/products/${productsA[1]}/invoices`, {
   token: tokenA,
-  body: { file_name: 'second.png', file_data: b64(PNG_BYTES), invoice_number: 'inv-dup-1', seller: 'duplicate STORE' }
+  body: { file_name: 'second.png', file_data: b64(pngVariant(11)), invoice_number: 'inv-dup-1', seller: 'duplicate STORE' }
 });
 check('Same seller+number (case-insensitive) rejected with 409 + duplicate flag',
       dupRepeat.status === 409 && dupRepeat.data.duplicate === true &&
@@ -278,28 +281,57 @@ check('Rejected duplicate stored NO file on disk', fileCountAfter === fileCountB
 
 const dupDifferent = await json('POST', `/api/products/${productsA[1]}/invoices`, {
   token: tokenA,
-  body: { file_name: 'third.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Different Store' }
+  body: { file_name: 'third.png', file_data: b64(pngVariant(12)), invoice_number: 'INV-DUP-1', seller: 'Different Store' }
 });
 check('Same number but DIFFERENT seller is not a duplicate', dupDifferent.status === 201, JSON.stringify(dupDifferent.data));
 createdInvoiceFiles.push(dupDifferent.data.invoice.file_path);
 
 const dupForce = await json('POST', `/api/products/${productsA[1]}/invoices`, {
   token: tokenA,
-  body: { file_name: 'fourth.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store', force: true }
+  body: { file_name: 'fourth.png', file_data: b64(pngVariant(13)), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store', force: true }
 });
 check('force:true saves the deliberate duplicate exception', dupForce.status === 201, JSON.stringify(dupForce.data));
 createdInvoiceFiles.push(dupForce.data.invoice.file_path);
 
 const dupMissingFields = await json('POST', `/api/products/${productsA[1]}/invoices`, {
   token: tokenA,
-  body: { file_name: 'fifth.png', file_data: b64(PNG_BYTES) } // no seller/number → no check possible
+  body: { file_name: 'fifth.png', file_data: b64(pngVariant(14)) } // no metadata → still hash-checked
 });
-check('Uploads without seller+number skip the duplicate check', dupMissingFields.status === 201, JSON.stringify(dupMissingFields.data));
+check('Uploads without seller+number save (unique file, nothing to compare)', dupMissingFields.status === 201, JSON.stringify(dupMissingFields.data));
 createdInvoiceFiles.push(dupMissingFields.data.invoice.file_path);
+const fifthInvoiceId = dupMissingFields.data.invoice_id;
+
+// Exact-file duplicates: re-uploading the SAME BYTES is flagged even when the
+// metadata fields are empty (this is what stops accidental double uploads).
+const dupSameFile = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'renamed copy.png', file_data: b64(pngVariant(14)) }
+});
+check('Re-uploading the exact same file is rejected (409) even with no metadata',
+      dupSameFile.status === 409 && dupSameFile.data.duplicate === true &&
+      dupSameFile.data.duplicate_reason === 'identical_file' &&
+      dupSameFile.data.existing_invoice.invoice_id === fifthInvoiceId, JSON.stringify(dupSameFile.data));
+
+const dupSameFileForce = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'renamed copy.png', file_data: b64(pngVariant(14)), force: true }
+});
+check('force:true allows the deliberate exact-file exception', dupSameFileForce.status === 201, JSON.stringify(dupSameFileForce.data));
+createdInvoiceFiles.push(dupSameFileForce.data.invoice.file_path);
+
+const dupSameFileOtherUser = await json('POST', `/api/products/${prodB.data.product_id}/invoices`, {
+  token: tokenB,
+  body: { file_name: 'same file other user.png', file_data: b64(pngVariant(14)) }
+});
+check('Identical file for a DIFFERENT user is not a duplicate', dupSameFileOtherUser.status === 201, JSON.stringify(dupSameFileOtherUser.data));
+createdInvoiceFiles.push(dupSameFileOtherUser.data.invoice.file_path);
+
+const dupSameFileHashStored = await prisma.invoices.findUnique({ where: { invoice_id: dupMissingFields.data.invoice_id } });
+check('SHA-256 file hash stored on the invoice row', /^[0-9a-f]{64}$/.test(dupSameFileHashStored.file_hash || ''), dupSameFileHashStored.file_hash);
 
 const dupForeign = await json('POST', `/api/products/${prodB.data.product_id}/invoices`, {
   token: tokenA,
-  body: { file_name: 'sixth.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
+  body: { file_name: 'sixth.png', file_data: b64(pngVariant(15)), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
 });
 check('Duplicate scope is per-user: User A invoice invisible to User B upload', dupForeign.status === 400, JSON.stringify(dupForeign.data));
 
@@ -316,7 +348,7 @@ const seededIds = [];
 for (const [number, seller, date] of searchSeed) {
   const r = await json('POST', `/api/products/${productsA[2]}/invoices`, {
     token: tokenA,
-    body: { file_name: 'seed.png', file_data: b64(PNG_BYTES), invoice_number: number, seller, invoice_date: date }
+    body: { file_name: 'seed.png', file_data: b64(pngVariant(20 + searchSeed.findIndex((x) => x[0] === number))), invoice_number: number, seller, invoice_date: date }
   });
   check(`Search seed ${number} uploaded`, r.status === 201, JSON.stringify(r.data));
   if (r.data.invoice) createdInvoiceFiles.push(r.data.invoice.file_path);
@@ -459,12 +491,70 @@ check('ocr_text is truncated to the 5000-char cap', (ocrRow?.ocr_text || '').len
 // endpoint must return 200 with empty fields / a friendly error, never crash.
 const ocrDegraded = await json('POST', '/api/invoices/ocr-preview', {
   token: tokenA,
-  body: { file_name: 'blank.png', file_data: b64(PNG_BYTES) }
+  body: { file_name: 'blank.png', file_data: b64(pngVariant(99)) }
 });
 check('Garbled image degrades gracefully (200, no crash)', ocrDegraded.status === 200 && ocrDegraded.data.success === true, JSON.stringify(ocrDegraded.data).slice(0, 200));
 check('Degraded OCR leaves the form fields empty for manual entry',
       ocrDegraded.data.ocr.invoice_number === '' && ocrDegraded.data.ocr.seller === '' && ocrDegraded.data.ocr.invoice_date === '',
       JSON.stringify({ n: ocrDegraded.data.ocr.invoice_number, s: ocrDegraded.data.ocr.seller, d: ocrDegraded.data.ocr.invoice_date }));
+
+// CID-keyed fonts (Identity-H): many real invoices (e.g. generated by billing
+// tools) store text as "<0044 0055…> Tj" glyph codes decoded via /ToUnicode.
+// Build one synthetically: encode the strings as 2-byte codes with a bfchar
+// map that maps each code to its Unicode char.
+const cidStrings = ['Invoice No: CID-2026-55', 'Sold by: Hexline Traders', 'Date: 2026-08-21'];
+const encodeCid = (str) => [...str].map((ch) => ch.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+const cidChars = [...new Set(cidStrings.join(''))];
+const bfcharEntries = cidChars.map((ch) => `<${ch.charCodeAt(0).toString(16).padStart(4, '0')}> <${ch.charCodeAt(0).toString(16).padStart(4, '0')}>`).join('\n');
+const cidContent = cidStrings
+  .map((str) => `BT /F1 12 Tf 72 ${720 - cidStrings.indexOf(str) * 24} Td <${encodeCid(str)}> Tj ET`)
+  .join('\n');
+const cidCMap = [
+  '/CIDInit /ProcSet findresource begin',
+  '12 dict begin', 'begincmap',
+  '1 begincodespacerange', '<0000> <FFFF>', 'endcodespacerange',
+  `${cidChars.length} beginbfchar`, bfcharEntries, 'endbfchar',
+  'endcmap', 'CMapName currentdict /CMap defineresource pop', 'end', 'end'
+].join('\n');
+const cidPdf = Buffer.concat([
+  Buffer.from('%PDF-1.4\n', 'latin1'),
+  Buffer.from(`1 0 obj << /Length ${Buffer.byteLength(cidContent)} >>\nstream\n${cidContent}\nendstream\nendobj\n`, 'latin1'),
+  Buffer.from(`2 0 obj << /Length ${Buffer.byteLength(cidCMap)} >>\nstream\n${cidCMap}\nendstream\nendobj\ntrailer\n%%EOF\n`, 'latin1')
+]);
+const ocrCid = await json('POST', '/api/invoices/ocr-preview', {
+  token: tokenA,
+  body: { file_name: 'cid-invoice.pdf', file_data: b64(cidPdf) }
+});
+check('CID/Identity-H PDF text is decoded via ToUnicode (200 + success)', ocrCid.status === 200 && ocrCid.data.success === true, JSON.stringify(ocrCid.data).slice(0, 250));
+check('CID PDF detects invoice number CID-2026-55', /CID-2026-55/.test(ocrCid.data.ocr?.invoice_number || ''), ocrCid.data.ocr?.invoice_number);
+check('CID PDF detects seller "Hexline Traders"', /Hexline Traders/.test(ocrCid.data.ocr?.seller || ''), ocrCid.data.ocr?.seller);
+check('CID PDF detects date 2026-08-21', ocrCid.data.ocr?.invoice_date === '2026-08-21', ocrCid.data.ocr?.invoice_date);
+
+// A PDF with NO text operators and no sizeable embedded images (PDF_BYTES is
+// a bare header + zeros) must still answer 200 with empty fields — never 500.
+const ocrNoText = await json('POST', '/api/invoices/ocr-preview', {
+  token: tokenA,
+  body: { file_name: 'empty.pdf', file_data: b64(PDF_BYTES) }
+});
+check('Textless PDF degrades to empty fields (200, no crash)', ocrNoText.status === 200 && ocrNoText.data.success === true && ocrNoText.data.ocr.invoice_number === '', JSON.stringify(ocrNoText.data).slice(0, 200));
+
+// Month-name dates ("Jul 02, 2026") must normalize to ISO — verified through
+// the full pipeline (normalizeDate itself is internal to the module):
+const monthDateBytes = (() => {
+  const content = 'BT /F1 12 Tf 72 720 Td (Invoice Date Jul 02, 2026 Sold by: Beta Store Invoice No: NM-7) Tj ET';
+  const stream = zlib.deflateSync(Buffer.from(content, 'latin1'));
+  return Buffer.concat([
+    Buffer.from(`%PDF-1.4\n1 0 obj << /Length ${stream.length} >>\nstream\n`, 'latin1'),
+    stream,
+    Buffer.from('\nendstream\nendobj\ntrailer\n%%EOF\n', 'latin1')
+  ]);
+})();
+const ocrMonth = await json('POST', '/api/invoices/ocr-preview', {
+  token: tokenA,
+  body: { file_name: 'invoice.pdf', file_data: b64(monthDateBytes) }
+});
+check('Month-name date "Jul 02, 2026" normalizes to 2026-07-02', ocrMonth.data.ocr?.invoice_date === '2026-07-02', JSON.stringify(ocrMonth.data.ocr));
+check('Month-name PDF still detects the invoice number NM-7', ocrMonth.data.ocr?.invoice_number === 'NM-7', ocrMonth.data.ocr?.invoice_number);
 
 // ── CLEANUP: remove test users (cascades products/invoices) + stray files ────
 for (const filePath of createdInvoiceFiles) {

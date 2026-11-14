@@ -33,6 +33,8 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
   // Tracks the latest selected file so a slow OCR pass can't fill the form
   // for a file the user has already replaced.
   const latestFileRef = useRef(null);
+  // Keeps the OCR text of the selected file so the upload can store it.
+  const lastOcrTextRef = useRef('');
 
   const clearFileState = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -47,6 +49,7 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     setServerError('');
     setOcrNote('');
     latestFileRef.current = null;
+    lastOcrTextRef.current = '';
   };
 
   const handleFileChange = (event) => {
@@ -73,6 +76,7 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     setValidationError('');
     setOcrNote('');
     latestFileRef.current = file;
+    lastOcrTextRef.current = ''; // cleared until the new file's OCR returns
 
     // Preview supported files: images inline, PDFs via the first page icon
     if (file.type === 'image/jpeg' || file.type === 'image/png') {
@@ -87,6 +91,7 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     ocrExtract(file)
       .then((ocr) => {
         if (latestFileRef.current !== file) return; // stale result
+        lastOcrTextRef.current = ocr.text || '';
         const detected = [];
         setMetadata((prev) => {
           const updates = { ...prev };
@@ -132,7 +137,8 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     try {
       // force=true only arrives here after the user explicitly confirmed below
       const force = duplicateWarning ? true : false;
-      const result = await uploadInvoice(productId, metadata, selectedFile, force);
+      const uploadMetadata = { ...metadata, ocr_text: lastOcrTextRef.current || '' };
+      const result = await uploadInvoice(productId, uploadMetadata, selectedFile, force);
       setSuccessMessage(result.message || 'Invoice uploaded successfully.');
       resetForm();
       if (onUploaded) {
@@ -140,7 +146,7 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
       }
     } catch (err) {
       if (err.status === 409 && err.data && err.data.duplicate) {
-        // Backend found an existing invoice with the same seller + invoice number.
+        // Backend flagged a duplicate (identical file, or same seller + number).
         setDuplicateWarning(err.data);
       } else {
         setServerError(err.message || 'Upload failed. Please try again.');

@@ -70,6 +70,7 @@ model Invoices {
   uploaded_at       DateTime @default(now())
   ocr_text          String?  // raw text extracted by the OCR pass (Part: OCR)
   ocr_processed     Boolean  @default(false)
+  file_hash         String?  // SHA-256 of the stored bytes → exact-duplicate detection
   product           Products @relation(fields: [product_id], references: [product_id], onDelete: Cascade)
 
   @@index([product_id])
@@ -77,6 +78,7 @@ model Invoices {
   @@index([invoice_number])
   @@index([seller])
   @@index([invoice_date])
+  @@index([file_hash])
 }
 
 // ── Member 3: Warranty Management (schema hook, owned by Member 3) ───────────
