@@ -72,21 +72,30 @@ export function formatFileSize(bytes) {
 /**
  * Uploads one invoice using the documented Base64 JSON transfer format:
  * POST /api/products/{productId}/invoices
+ * `force: true` is the explicit "save anyway" confirmation for duplicates.
  */
-export async function uploadInvoice(productId, metadata, file) {
+export async function uploadInvoice(productId, metadata, file, force = false) {
   const fileData = await fileToBase64(file);
   return api.post(`/api/products/${productId}/invoices`, {
     file_name: file.name,
     file_data: fileData,
     invoice_number: metadata.invoice_number || '',
     seller: metadata.seller || '',
-    invoice_date: metadata.invoice_date || ''
+    invoice_date: metadata.invoice_date || '',
+    force
   });
 }
 
-/** Lists every invoice of the logged-in user across all products. */
-export function getAllInvoices() {
-  return api.get('/api/invoices');
+/** Lists invoices — optional Part E search & sort params. */
+export function getAllInvoices(params = {}) {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== '' && value !== null && value !== undefined) {
+      searchParams.append(key, value);
+    }
+  }
+  const queryString = searchParams.toString();
+  return api.get(`/api/invoices${queryString ? '?' + queryString : ''}`);
 }
 
 /** Lists invoices attached to one product. */
@@ -113,6 +122,20 @@ export function deleteInvoice(invoiceId) {
 }
 
 /**
+ * OCR preview (Part: OCR): sends the selected file to the backend BEFORE
+ * uploading; the server extracts text (PDF via zlib, images via tesseract.js)
+ * and returns detected fields so the form can be auto-filled. Nothing is stored.
+ */
+export async function ocrExtract(file) {
+  const fileData = await fileToBase64(file);
+  const result = await api.post('/api/invoices/ocr-preview', {
+    file_name: file.name,
+    file_data: fileData
+  });
+  return result.ocr || {};
+}
+
+/**
  * Fetches the actual invoice file as a Blob using the Authorization header
  * (never a plain <img src> URL, so the session token is always attached and
  * other users' files stay unreachable).
@@ -120,7 +143,8 @@ export function deleteInvoice(invoiceId) {
 export async function fetchInvoiceBlob(invoiceId) {
   const token = localStorage.getItem('vaultly_token') || '';
   const response = await fetch(`${API_BASE}/api/invoices/${invoiceId}/download`, {
-    headers: { 'Authorization': `Bearer ${token}` }
+    headers: { 'Authorization': `Bearer ${token}` },
+    credentials: 'include' // cookie session also authenticates this call
   });
   if (!response.ok) {
     let message = 'Could not load the invoice file.';

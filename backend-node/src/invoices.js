@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Prisma } from '@prisma/client';
 import { prisma } from './prisma.js';
 import { mergeSort } from './dsa.js';
 import { getProductById } from './products.js';
@@ -99,16 +100,18 @@ function shapeInvoice(invoice) {
   return { ...rest, product_name: product ? product.name : null };
 }
 
-// ── CORE: UPLOAD (Base64 JSON transfer format) ───────────────────────────────
+// ── CORE: UPLOAD (Base64 JSON transfer format + duplicate detection) ────────
 
-export async function uploadInvoice(productId, userId, data) {
-  // 1. Ownership check: the invoice must attach to a product the user owns.
-  const product = await getProductById(productId, userId);
-  if (!product) {
-    return { success: false, error: 'Product not found or access denied.' };
-  }
+// ── SHARED FILE VALIDATION (used by upload AND the OCR preview endpoint) ─────
 
-  // 2. Extension whitelist (checks the NAME the user claims).
+/**
+ * Validates the documented Base64 file payload:
+ * name required → extension whitelist → encoded size before decode →
+ * strict Base64 → decoded size → magic bytes.
+ * Returns { success: true, extension, fileBytes } or { success: false, error }.
+ */
+export function validateFilePayload(data) {
+  // 1. Extension whitelist (checks the NAME the user claims).
   const originalName = (data.file_name || '').trim();
   if (!originalName) {
     return { success: false, error: 'A file must be selected before uploading.' };
@@ -121,7 +124,7 @@ export async function uploadInvoice(productId, userId, data) {
     };
   }
 
-  // 3. Size limit enforced on the ENCODED payload BEFORE decoding.
+  // 2. Size limit enforced on the ENCODED payload BEFORE decoding.
   const fileData = data.file_data || '';
   if (!fileData) {
     return { success: false, error: 'The selected file appears to be empty.' };
@@ -130,14 +133,14 @@ export async function uploadInvoice(productId, userId, data) {
     return { success: false, error: 'File is too large. Maximum allowed size is 5 MB.' };
   }
 
-  // 4. Decode Base64 safely (strict alphabet check first — Node's Buffer
+  // 3. Decode Base64 safely (strict alphabet check first — Node's Buffer
   //    decoding is lenient by default, so we validate the input ourselves).
   if (!isStrictBase64(fileData)) {
     return { success: false, error: 'The file data is corrupted. Please try uploading again.' };
   }
   const fileBytes = Buffer.from(fileData, 'base64');
 
-  // 5. Real size check on the decoded bytes (the final authority).
+  // 4. Real size check on the decoded bytes (the final authority).
   if (fileBytes.length === 0) {
     return { success: false, error: 'The selected file appears to be empty.' };
   }
@@ -145,7 +148,7 @@ export async function uploadInvoice(productId, userId, data) {
     return { success: false, error: 'File is too large. Maximum allowed size is 5 MB.' };
   }
 
-  // 6. Content verification via magic bytes (never trust the extension).
+  // 5. Content verification via magic bytes (never trust the extension).
   if (!hasValidSignature(fileBytes, extension)) {
     return {
       success: false,
@@ -153,53 +156,111 @@ export async function uploadInvoice(productId, userId, data) {
     };
   }
 
-  // 7. Optional metadata validation.
+  return { success: true, extension, fileBytes, originalName };
+}
+
+export async function uploadInvoice(productId, userId, data) {
+  // 1. Ownership check: the invoice must attach to a product the user owns.
+  const product = await getProductById(productId, userId);
+  if (!product) {
+    return { success: false, error: 'Product not found or access denied.' };
+  }
+
+  // 2-5. Shared validation: whitelist, size limits, Base64, magic bytes.
+  const validation = validateFilePayload(data);
+  if (!validation.success) {
+    return validation;
+  }
+  const { extension, fileBytes, originalName } = validation;
+
+  // 7. Optional metadata validation + OCR text (captured by the preview step).
   const invoiceNumber = (data.invoice_number || '').trim();
   const seller = (data.seller || '').trim();
   const invoiceDate = (data.invoice_date || '').trim();
   if (invoiceDate && !isValidDateString(invoiceDate)) {
     return { success: false, error: 'Invoice date must use the YYYY-MM-DD format.' };
   }
+  const ocrText = typeof data.ocr_text === 'string' ? data.ocr_text.slice(0, 5000) : '';
+  const ocrProcessed = ocrText.length > 0;
 
-  // 8. Save the bytes under uploads/u{userId}/ with a generated safe name.
+  // 8. Duplicate check + save happen inside ONE database transaction so a
+  //    concurrent identical upload cannot slip between the check and the
+  //    insert (SQLite serializes writers; details in docs/INVOICES_API.md).
+  //    `force: true` is the user's deliberate "save anyway" exception.
+  const duplicateCheckNeeded = !data.force && Boolean(seller && invoiceNumber);
   const storedName = generateSafeFileName(userId, productId, extension);
   const userDirectory = path.join(UPLOAD_DIR, `u${userId}`);
   const absolutePath = path.join(userDirectory, storedName);
   const relativePath = path.join(`u${userId}`, storedName);
 
+  let outcome;
   try {
-    await fsp.mkdir(userDirectory, { recursive: true });
-    await fsp.writeFile(absolutePath, fileBytes);
-  } catch {
-    return { success: false, error: 'Server could not store the file. Please try again.' };
-  }
+    outcome = await prisma.$transaction(async (tx) => {
+      if (duplicateCheckNeeded) {
+        // COLLATE NOCASE = the seller/invoice-number comparison is case-insensitive
+        const existing = await tx.$queryRaw`
+          SELECT i.invoice_id, i.invoice_number, i.seller, i.invoice_date,
+                 i.original_filename, i.uploaded_at, p.name AS product_name
+          FROM Invoices i
+          JOIN Products p ON p.product_id = i.product_id
+          WHERE p.user_id = ${userId}
+            AND i.invoice_number = ${invoiceNumber} COLLATE NOCASE
+            AND i.seller = ${seller} COLLATE NOCASE
+          LIMIT 1
+        `;
+        if (existing.length > 0) {
+          return { duplicate: existing[0] };
+        }
+      }
 
-  // 9. Record the invoice in the shared database (Prisma = parameterized SQL).
-  try {
-    const created = await prisma.invoices.create({
-      data: {
-        product_id: productId,
-        invoice_number: invoiceNumber || null,
-        seller: seller || null,
-        invoice_date: invoiceDate || null,
-        file_path: relativePath,
-        original_filename: path.basename(originalName), // display-only
-        file_size: fileBytes.length,
-        mime_type: MIME_MAP[extension] // O(1) dictionary lookup
-      },
-      include: { product: { select: { name: true } } }
+      await fsp.mkdir(userDirectory, { recursive: true });
+      await fsp.writeFile(absolutePath, fileBytes);
+
+      const created = await tx.invoices.create({
+        data: {
+          product_id: productId,
+          invoice_number: invoiceNumber || null,
+          seller: seller || null,
+          invoice_date: invoiceDate || null,
+          file_path: relativePath,
+          original_filename: path.basename(originalName), // display-only
+          file_size: fileBytes.length,
+          mime_type: MIME_MAP[extension], // O(1) dictionary lookup
+          ocr_text: ocrText || null,
+          ocr_processed: ocrProcessed
+        },
+        include: { product: { select: { name: true } } }
+      });
+      return { created };
     });
-    return {
-      success: true,
-      message: 'Invoice uploaded successfully.',
-      invoice_id: created.invoice_id,
-      invoice: shapeInvoice(created)
-    };
   } catch (err) {
-    // Database insert failed: remove the orphan file so no garbage is left.
+    // Transaction failed (e.g. DB error after the file was written): clean up
     await fsp.unlink(absolutePath).catch(() => {});
     return { success: false, error: `Database insertion failed: ${err.message}` };
   }
+
+  // 9. Duplicate found: do NOT save; hand the existing record back so the UI
+  //    can warn the user and let them review it or save anyway explicitly.
+  if (outcome.duplicate) {
+    return {
+      success: false,
+      duplicate: true,
+      error: `Possible duplicate: an invoice from "${seller}" with number "${invoiceNumber}" already exists. Review it, or confirm to save anyway.`,
+      existing_invoice: {
+        ...outcome.duplicate,
+        uploaded_at: outcome.duplicate.uploaded_at
+          ? outcome.duplicate.uploaded_at.toISOString()
+          : null
+      }
+    };
+  }
+
+  return {
+    success: true,
+    message: 'Invoice uploaded successfully.',
+    invoice_id: outcome.created.invoice_id,
+    invoice: shapeInvoice(outcome.created)
+  };
 }
 
 // ── QUERIES ──────────────────────────────────────────────────────────────────
@@ -235,6 +296,91 @@ export async function getAllInvoices(userId) {
     (inv) => (inv.uploaded_at ? inv.uploaded_at.toISOString() : ''),
     true
   );
+}
+
+// ── PART E: SEARCH & SORTING (database-level, Prisma + parameterized SQL) ────
+//
+// Complexity notes (see docs/INVOICES_API.md for the full write-up):
+// - Search with LIKE '%q%': O(n) scan over the user's invoices (a B-tree index
+//   cannot accelerate a leading-wildcard search), each row matched in O(m).
+// - Sort by invoice_date: O(n log n) without an index; with the new
+//   Invoices(invoice_date) index SQLite can walk the index in O(n) and skip
+//   the sorting step entirely.
+// - The DEFAULT listing (no search/sort params) still uses the hand-written
+//   DSA Merge Sort (O(n log n)) on uploaded_at — kept for the viva demo.
+
+const SEARCH_FIELDS = new Set(['invoice_number', 'seller', 'product', 'all']);
+const SORT_ORDERS = new Set(['date_asc', 'date_desc']);
+
+function shapeRawInvoice(row) {
+  return {
+    ...row,
+    uploaded_at: row.uploaded_at ? new Date(row.uploaded_at).toISOString() : null
+  };
+}
+
+export async function searchInvoices(userId, { search = '', field = 'all', sort = '' } = {}) {
+  const searchValue = String(search || '').trim();
+  const searchField = SEARCH_FIELDS.has(field) ? field : 'all';
+  const sortOrder = SORT_ORDERS.has(sort) ? sort : '';
+
+  // No search text → plain listing. Pure date-sort goes through Prisma's
+  // orderBy (the invoice_date index lets SQLite skip the sort step); no sort
+  // param → the default newest-uploaded DSA Merge Sort listing.
+  if (!searchValue) {
+    if (sortOrder === 'date_asc') {
+      const rows = await prisma.invoices.findMany({
+        where: { product: { user_id: userId } },
+        // nulls: 'last' — invoices without a date never sit at the top
+        orderBy: [{ invoice_date: { sort: 'asc', nulls: 'last' } }, { uploaded_at: 'desc' }],
+        include: { product: { select: { name: true } } }
+      });
+      return rows.map(shapeInvoice);
+    }
+    if (sortOrder === 'date_desc') {
+      const rows = await prisma.invoices.findMany({
+        where: { product: { user_id: userId } },
+        orderBy: [{ invoice_date: { sort: 'desc', nulls: 'last' } }, { uploaded_at: 'desc' }],
+        include: { product: { select: { name: true } } }
+      });
+      return rows.map(shapeInvoice);
+    }
+    return getAllInvoices(userId);
+  }
+
+  // Search mode: one parameterized SQL query does filter + sort together.
+  // LIKE with ASCII text is case-insensitive in SQLite by default.
+  const like = `%${searchValue}%`;
+  let matchClause;
+  if (searchField === 'invoice_number') {
+    matchClause = Prisma.sql`AND i.invoice_number LIKE ${like}`;
+  } else if (searchField === 'seller') {
+    matchClause = Prisma.sql`AND i.seller LIKE ${like}`;
+  } else if (searchField === 'product') {
+    matchClause = Prisma.sql`AND p.name LIKE ${like}`;
+  } else {
+    matchClause = Prisma.sql`AND (i.invoice_number LIKE ${like} OR i.seller LIKE ${like} OR p.name LIKE ${like})`;
+  }
+
+  // invoice_date is stored as YYYY-MM-DD text, so lexicographic order = date order.
+  // NULLS LAST keeps undated invoices at the bottom; ties fall back to newest upload.
+  const orderClause = sortOrder === 'date_asc'
+    ? Prisma.raw('ORDER BY i.invoice_date ASC NULLS LAST, i.uploaded_at DESC')
+    : sortOrder === 'date_desc'
+      ? Prisma.raw('ORDER BY i.invoice_date DESC NULLS LAST, i.uploaded_at DESC')
+      : Prisma.raw('ORDER BY i.uploaded_at DESC');
+
+  const rows = await prisma.$queryRaw`
+    SELECT i.invoice_id, i.product_id, i.invoice_number, i.seller, i.invoice_date,
+           i.file_path, i.original_filename, i.file_size, i.mime_type, i.uploaded_at,
+           p.name AS product_name
+    FROM Invoices i
+    JOIN Products p ON p.product_id = i.product_id
+    WHERE p.user_id = ${userId}
+    ${matchClause}
+    ${orderClause}
+  `;
+  return rows.map(shapeRawInvoice);
 }
 
 // ── DOWNLOAD SUPPORT ─────────────────────────────────────────────────────────

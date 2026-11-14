@@ -20,13 +20,20 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = authService.getToken();
-    const storedUser = authService.getUser();
-
-    if (token && storedUser) {
-      setUser(storedUser);
-    }
-    setLoading(false);
+    // Session restore: ask the server (cookie/Bearer session) instead of
+    // trusting localStorage, so 7-day sessions survive server restarts.
+    const restoreSession = async () => {
+      try {
+        const data = await api.get('/api/me');
+        setUser(data.user);
+        localStorage.setItem('vaultly_user', JSON.stringify(data.user));
+      } catch {
+        authService.clearSession();
+        setUser(null);
+      }
+      setLoading(false);
+    };
+    restoreSession();
   }, []);
 
   const handleLogin = (userData, token) => {

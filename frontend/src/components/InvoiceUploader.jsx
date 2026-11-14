@@ -5,26 +5,34 @@
  * transfer format. Validation errors appear instantly with clear messages.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   validateInvoiceFile,
   uploadInvoice,
+  ocrExtract,
   formatFileSize,
   MAX_FILE_SIZE_BYTES
 } from '../services/invoiceService';
 
 export default function InvoiceUploader({ productId, productLabel, onUploaded, compact = false }) {
+  const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [validationError, setValidationError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [serverError, setServerError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [duplicateWarning, setDuplicateWarning] = useState(null); // { existing_invoice }
+  const [ocrNote, setOcrNote] = useState('');
   const [metadata, setMetadata] = useState({
     invoice_number: '',
     seller: '',
     invoice_date: ''
   });
+  // Tracks the latest selected file so a slow OCR pass can't fill the form
+  // for a file the user has already replaced.
+  const latestFileRef = useRef(null);
 
   const clearFileState = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -37,11 +45,14 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     clearFileState();
     setMetadata({ invoice_number: '', seller: '', invoice_date: '' });
     setServerError('');
+    setOcrNote('');
+    latestFileRef.current = null;
   };
 
   const handleFileChange = (event) => {
     setServerError('');
     setSuccessMessage('');
+    setDuplicateWarning(null);
     const file = event.target.files && event.target.files[0];
     if (!file) {
       clearFileState();
@@ -60,6 +71,8 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setSelectedFile(file);
     setValidationError('');
+    setOcrNote('');
+    latestFileRef.current = file;
 
     // Preview supported files: images inline, PDFs via the first page icon
     if (file.type === 'image/jpeg' || file.type === 'image/png') {
@@ -67,6 +80,42 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     } else {
       setPreviewUrl('');
     }
+
+    // Part: OCR — ask the backend to read the file's details in the
+    // background and pre-fill the empty fields. Nothing is stored here;
+    // the user reviews/edits everything before uploading.
+    ocrExtract(file)
+      .then((ocr) => {
+        if (latestFileRef.current !== file) return; // stale result
+        const detected = [];
+        setMetadata((prev) => {
+          const updates = { ...prev };
+          if (ocr.invoice_number && !prev.invoice_number) {
+            updates.invoice_number = ocr.invoice_number;
+            detected.push('invoice number');
+          }
+          if (ocr.seller && !prev.seller) {
+            updates.seller = ocr.seller;
+            detected.push('seller');
+          }
+          if (ocr.invoice_date && !prev.invoice_date) {
+            updates.invoice_date = ocr.invoice_date;
+            detected.push('date');
+          }
+          return updates;
+        });
+        if (detected.length > 0) {
+          setOcrNote(`🤖 Auto-filled ${detected.join(', ')} from the file (OCR — ${ocr.engine}). Please verify before uploading.`);
+        } else if (ocr.error) {
+          setOcrNote(`🤖 OCR could not read this file. ${ocr.error}`);
+        } else {
+          setOcrNote('🤖 OCR ran, but no invoice details were detected. Please fill the fields manually.');
+        }
+      })
+      .catch(() => {
+        if (latestFileRef.current !== file) return;
+        setOcrNote('🤖 OCR preview failed. You can still fill the fields manually.');
+      });
   };
 
   const handleUpload = async (event) => {
@@ -79,18 +128,31 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
     setUploading(true);
     setServerError('');
     setSuccessMessage('');
+    setDuplicateWarning(null);
     try {
-      const result = await uploadInvoice(productId, metadata, selectedFile);
+      // force=true only arrives here after the user explicitly confirmed below
+      const force = duplicateWarning ? true : false;
+      const result = await uploadInvoice(productId, metadata, selectedFile, force);
       setSuccessMessage(result.message || 'Invoice uploaded successfully.');
       resetForm();
       if (onUploaded) {
         onUploaded(result.invoice);
       }
     } catch (err) {
-      setServerError(err.message || 'Upload failed. Please try again.');
+      if (err.status === 409 && err.data && err.data.duplicate) {
+        // Backend found an existing invoice with the same seller + invoice number.
+        setDuplicateWarning(err.data);
+      } else {
+        setServerError(err.message || 'Upload failed. Please try again.');
+      }
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleSaveAnyway = () => {
+    // Explicit user confirmation → retry the same upload with force=true
+    handleUpload(new Event('submit'));
   };
 
   return (
@@ -170,13 +232,55 @@ export default function InvoiceUploader({ productId, productLabel, onUploaded, c
           </div>
         </div>
 
+        {/* OCR auto-fill note (Part: OCR) — shown after a file is analysed */}
+        {ocrNote && (
+          <p className="upload-note ocr-note">{ocrNote}</p>
+        )}
+
         {productLabel && (
           <p className="upload-target">Uploading for: <strong>{productLabel}</strong></p>
         )}
 
-        <button type="submit" className="btn btn-primary" disabled={uploading || !selectedFile}>
-          {uploading ? '⏳ Uploading…' : '⬆️ Upload Invoice'}
-        </button>
+        {duplicateWarning ? (
+          /* Backend flagged seller + invoice number as already saved: the user
+             must review the existing invoice or explicitly confirm. */
+          <div className="duplicate-warning">
+            <p className="duplicate-warning-title">⚠️ Possible duplicate invoice</p>
+            <p className="duplicate-warning-text">{duplicateWarning.error}</p>
+            {duplicateWarning.existing_invoice && (
+              <div className="duplicate-existing">
+                <span className="duplicate-existing-name">
+                  {duplicateWarning.existing_invoice.original_filename || 'Existing invoice'}
+                </span>
+                <span className="duplicate-existing-sub">
+                  {duplicateWarning.existing_invoice.seller || '—'}
+                  {duplicateWarning.existing_invoice.invoice_number ? ` • ${duplicateWarning.existing_invoice.invoice_number}` : ''}
+                  {duplicateWarning.existing_invoice.invoice_date ? ` • dated ${duplicateWarning.existing_invoice.invoice_date}` : ''}
+                  {duplicateWarning.existing_invoice.uploaded_at ? ` • uploaded ${duplicateWarning.existing_invoice.uploaded_at}` : ''}
+                </span>
+              </div>
+            )}
+            <div className="duplicate-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate(`/invoices/${duplicateWarning.existing_invoice.invoice_id}`)}
+              >
+                👁️ Review Existing
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleSaveAnyway} disabled={uploading}>
+                {uploading ? '⏳ Saving…' : '✅ Save Anyway (I confirm)'}
+              </button>
+              <button type="button" className="btn btn-danger" onClick={() => setDuplicateWarning(null)}>
+                ✖ Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="submit" className="btn btn-primary" disabled={uploading || !selectedFile}>
+            {uploading ? '⏳ Uploading…' : '⬆️ Upload Invoice'}
+          </button>
+        )}
 
         {serverError && (
           <p className="upload-message upload-message-error">⚠️ {serverError}</p>

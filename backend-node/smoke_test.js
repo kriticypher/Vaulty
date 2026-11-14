@@ -9,7 +9,10 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { UPLOAD_DIR } from './src/invoices.js';
+import { prisma } from './src/prisma.js';
 import { app } from './src/server.js';
 
 let passed = 0;
@@ -219,12 +222,255 @@ const relinkOwn = await json('PUT', `/api/invoices/${linkInvoice.data.invoice_id
 });
 check('Re-linking to own product succeeds', relinkOwn.status === 200 && relinkOwn.data.invoice.product_id === productsA[2], JSON.stringify(relinkOwn.data));
 
+// ── 9. COOKIES & 7-DAY SESSIONS ──────────────────────────────────────────────
+console.log('\n9. Cookie & Session Tests:');
+const cookieLogin = await fetch(`${base()}/api/login`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: emailA, password: 'password1' })
+});
+const setCookie = cookieLogin.headers.get('set-cookie') || '';
+check('Login sets HttpOnly session cookie with 7-day Max-Age',
+      setCookie.includes('vaultly_session=') && setCookie.includes('HttpOnly') && setCookie.includes('Max-Age=604800'),
+      setCookie);
+const cookieToken = /vaultly_session=([^;]+)/.exec(setCookie)?.[1];
+
+const meViaCookie = await json('GET', '/api/me', { token: cookieToken });
+check('Session authenticates via Bearer fallback', meViaCookie.status === 200, JSON.stringify(meViaCookie.data));
+
+const meViaCookieHeader = await fetch(`${base()}/api/me`, {
+  headers: { Cookie: `vaultly_session=${cookieToken}` }
+});
+check('Session authenticates via cookie (no Authorization header)', meViaCookieHeader.status === 200, `status=${meViaCookieHeader.status}`);
+
+const badCookie = await fetch(`${base()}/api/me`, { headers: { Cookie: 'vaultly_session=forged-token-value' } });
+check('Forged/unknown cookie rejected (401)', badCookie.status === 401, `status=${badCookie.status}`);
+
+const cookieLogout = await fetch(`${base()}/api/logout`, { method: 'POST', headers: { Cookie: `vaultly_session=${cookieToken}` } });
+const logoutCookie = cookieLogout.headers.get('set-cookie') || '';
+check('Logout clears the session cookie (Max-Age=0)', logoutCookie.includes('Max-Age=0'), logoutCookie);
+const meAfterLogout = await fetch(`${base()}/api/me`, { headers: { Cookie: `vaultly_session=${cookieToken}` } });
+check('Session token invalid after logout', meAfterLogout.status === 401, `status=${meAfterLogout.status}`);
+
+// ── 10. DUPLICATE INVOICE DETECTION ──────────────────────────────────────────
+console.log('\n10. Duplicate Detection Tests:');
+const dupUpload = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'first.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
+});
+check('First invoice with seller+number saves', dupUpload.status === 201, JSON.stringify(dupUpload.data));
+createdInvoiceFiles.push(dupUpload.data.invoice.file_path);
+
+const userAId = loginA.data.user.user_id;
+const userUploadsDir = path.join(UPLOAD_DIR, `u${userAId}`);
+const fileCountBefore = (await fsp.readdir(userUploadsDir)).length;
+
+const dupRepeat = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'second.png', file_data: b64(PNG_BYTES), invoice_number: 'inv-dup-1', seller: 'duplicate STORE' }
+});
+check('Same seller+number (case-insensitive) rejected with 409 + duplicate flag',
+      dupRepeat.status === 409 && dupRepeat.data.duplicate === true &&
+      dupRepeat.data.existing_invoice.invoice_id === dupUpload.data.invoice_id, JSON.stringify(dupRepeat.data));
+
+const fileCountAfter = (await fsp.readdir(userUploadsDir)).length;
+check('Rejected duplicate stored NO file on disk', fileCountAfter === fileCountBefore, `before=${fileCountBefore} after=${fileCountAfter}`);
+
+const dupDifferent = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'third.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Different Store' }
+});
+check('Same number but DIFFERENT seller is not a duplicate', dupDifferent.status === 201, JSON.stringify(dupDifferent.data));
+createdInvoiceFiles.push(dupDifferent.data.invoice.file_path);
+
+const dupForce = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'fourth.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store', force: true }
+});
+check('force:true saves the deliberate duplicate exception', dupForce.status === 201, JSON.stringify(dupForce.data));
+createdInvoiceFiles.push(dupForce.data.invoice.file_path);
+
+const dupMissingFields = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'fifth.png', file_data: b64(PNG_BYTES) } // no seller/number → no check possible
+});
+check('Uploads without seller+number skip the duplicate check', dupMissingFields.status === 201, JSON.stringify(dupMissingFields.data));
+createdInvoiceFiles.push(dupMissingFields.data.invoice.file_path);
+
+const dupForeign = await json('POST', `/api/products/${prodB.data.product_id}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'sixth.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
+});
+check('Duplicate scope is per-user: User A invoice invisible to User B upload', dupForeign.status === 400, JSON.stringify(dupForeign.data));
+
+// ── 11. PART E: SEARCH & SORT ────────────────────────────────────────────────
+console.log('\n11. Search & Sort Tests (Part E):');
+// Fresh invoices with distinct numbers/sellers/dates so the assertions below
+// are deterministic regardless of earlier sections.
+const searchSeed = [
+  ['SEA-100', 'Zeta Retail', '2026-01-10'],
+  ['sea-200', 'Ocean Traders', '2026-05-20'],
+  ['OTHER-1', 'Zeta Retail', '2026-03-15']
+];
+const seededIds = [];
+for (const [number, seller, date] of searchSeed) {
+  const r = await json('POST', `/api/products/${productsA[2]}/invoices`, {
+    token: tokenA,
+    body: { file_name: 'seed.png', file_data: b64(PNG_BYTES), invoice_number: number, seller, invoice_date: date }
+  });
+  check(`Search seed ${number} uploaded`, r.status === 201, JSON.stringify(r.data));
+  if (r.data.invoice) createdInvoiceFiles.push(r.data.invoice.file_path);
+  seededIds.push(r.data.invoice_id);
+}
+
+const listAll = await json('GET', '/api/invoices', { token: tokenA });
+check('GET /api/invoices lists every invoice', listAll.status === 200 && listAll.data.invoices.length >= 6, `count=${listAll.data.invoices.length}`);
+
+const sNum = await json('GET', '/api/invoices?search=sea&field=invoice_number', { token: tokenA });
+check('Search by invoice number finds SEA-100 + sea-200 (case-insensitive)',
+      sNum.data.invoices.length === 2 &&
+      sNum.data.invoices.some((i) => i.invoice_number === 'SEA-100') &&
+      sNum.data.invoices.some((i) => i.invoice_number === 'sea-200'), JSON.stringify(sNum.data.invoices.map((i) => i.invoice_number)));
+
+const sSeller = await json('GET', '/api/invoices?search=zeta&field=seller', { token: tokenA });
+check('Search by seller finds both Zeta Retail invoices',
+      sSeller.data.invoices.length === 2 && sSeller.data.invoices.every((i) => i.seller === 'Zeta Retail'), JSON.stringify(sSeller.data.invoices.map((i) => i.invoice_number)));
+
+const sProduct = await json('GET', '/api/invoices?search=gamma desk&field=product', { token: tokenA });
+check('Search by product name finds the 3 seeded Gamma Desk invoices (plus any un-numbered ones)',
+      sProduct.data.invoices.filter((i) => i.invoice_number).length === 3 &&
+      sProduct.data.invoices.every((i) => i.product_name === 'Gamma Desk'), JSON.stringify(sProduct.data.invoices.map((i) => [i.invoice_number, i.product_name])));
+
+const sProductBeta = await json('GET', '/api/invoices?search=beta&field=product', { token: tokenA });
+check('Product-name search matches the Beta Mouse invoices',
+      sProductBeta.data.invoices.length >= 3 && sProductBeta.data.invoices.every((i) => i.product_name === 'Beta Mouse'), JSON.stringify(sProductBeta.data.invoices.map((i) => i.invoice_number)));
+
+const sAll = await json('GET', '/api/invoices?search=sea', { token: tokenA });
+check('field=all matches number OR seller', sAll.data.invoices.length >= 2, JSON.stringify(sAll.data.invoices.map((i) => [i.invoice_number, i.seller])));
+
+const sNone = await json('GET', '/api/invoices?search=zzz-nothing', { token: tokenA });
+check('No match returns an empty list', sNone.status === 200 && sNone.data.invoices.length === 0, JSON.stringify(sNone.data));
+
+const sortAsc = await json('GET', '/api/invoices?sort=date_asc', { token: tokenA });
+const ascDates = sortAsc.data.invoices.map((i) => i.invoice_date || '9999');
+check('date_asc returns oldest invoice date first (2026-01-10)', ascDates[0] === '2026-01-10', JSON.stringify(ascDates));
+check('date_asc list is non-decreasing by date', ascDates.every((d, idx) => idx === 0 || ascDates[idx - 1] <= d), JSON.stringify(ascDates));
+
+const sortDesc = await json('GET', '/api/invoices?sort=date_desc', { token: tokenA });
+const descDates = sortDesc.data.invoices.map((i) => i.invoice_date || '');
+check('date_desc returns newest invoice date first (2026-05-20)', descDates[0] === '2026-05-20', JSON.stringify(descDates));
+check('date_desc list is non-increasing by date', descDates.every((d, idx) => idx === 0 || descDates[idx - 1] >= d), JSON.stringify(descDates));
+
+const sSorted = await json('GET', '/api/invoices?search=zeta&field=seller&sort=date_asc', { token: tokenA });
+check('Search + sort combine (Zeta invoices by date asc)',
+      JSON.stringify(sSorted.data.invoices.map((i) => i.invoice_date)) === JSON.stringify(['2026-01-10', '2026-03-15']),
+      JSON.stringify(sSorted.data.invoices.map((i) => i.invoice_date)));
+
+const sForeign = await json('GET', '/api/invoices?search=sea', { token: tokenB });
+check('Search scope is per-user (User B finds none of User A invoices)', sForeign.data.invoices.length === 0, JSON.stringify(sForeign.data));
+
+const sNoAuth = await json('GET', '/api/invoices?search=sea');
+check('Search requires authentication (401)', sNoAuth.status === 401, `status=${sNoAuth.status}`);
+
+// ── 12. BCRYPT PASSWORD HASHING ──────────────────────────────────────────────
+console.log('\n12. bcrypt Tests:');
+const bcryptEmail = `smoketest-bcrypt-${Date.now()}@example.com`;
+createdUserEmails.push(bcryptEmail);
+await json('POST', '/api/register', { body: { name: 'Bcrypt Tester', email: bcryptEmail, password: 'secret123', confirm_password: 'secret123' } });
+
+const bcryptRow = await prisma.users.findUnique({ where: { email: bcryptEmail } });
+check('New registration stores a bcrypt hash ($2 prefix)', /^\$2[aby]\$/.test(bcryptRow.password_hash), bcryptRow.password_hash.slice(0, 7));
+check('bcrypt cost factor is 10', bcryptRow.password_hash.startsWith('$2a$10$') || bcryptRow.password_hash.startsWith('$2b$10$'), bcryptRow.password_hash.slice(0, 9));
+check('bcrypt hashes embed a unique salt (no plain salt needed)', bcryptRow.password_hash.length >= 59, `len=${bcryptRow.password_hash.length}`);
+
+const bcryptLogin = await json('POST', '/api/login', { body: { email: bcryptEmail, password: 'secret123' } });
+check('Login verifies against the bcrypt hash', bcryptLogin.status === 200 && bcryptLogin.data.success === true, JSON.stringify(bcryptLogin.data));
+const bcryptWrong = await json('POST', '/api/login', { body: { email: bcryptEmail, password: 'wrong-pass' } });
+check('Wrong password rejected for bcrypt account (401)', bcryptWrong.status === 401, `status=${bcryptWrong.status}`);
+
+// Legacy account: a row still holding the old PBKDF2 hash must log in and be
+// transparently upgraded to bcrypt on that successful login.
+const legacyEmail = `smoketest-legacy-${Date.now()}@example.com`;
+createdUserEmails.push(legacyEmail);
+const legacySalt = crypto.randomBytes(16).toString('hex');
+const legacyHash = crypto.pbkdf2Sync('oldpass99', legacySalt, 100000, 32, 'sha256').toString('hex');
+await prisma.users.create({ data: { name: 'Legacy User', email: legacyEmail, password_hash: legacyHash, salt: legacySalt } });
+
+const legacyLogin = await json('POST', '/api/login', { body: { email: legacyEmail, password: 'oldpass99' } });
+check('Legacy PBKDF2 account can still log in', legacyLogin.status === 200 && legacyLogin.data.success === true, JSON.stringify(legacyLogin.data));
+const upgradedRow = await prisma.users.findUnique({ where: { email: legacyEmail } });
+check('Legacy hash transparently upgraded to bcrypt after login', /^\$2[aby]\$/.test(upgradedRow.password_hash), upgradedRow.password_hash.slice(0, 7));
+const legacyAgain = await json('POST', '/api/login', { body: { email: legacyEmail, password: 'oldpass99' } });
+check('Upgraded account logs in again with the same password', legacyAgain.status === 200, `status=${legacyAgain.status}`);
+
+// ── 13. OCR (PDF text extraction + graceful image degradation) ───────────────
+console.log('\n13. OCR Tests:');
+// Hand-built one-page PDF whose content stream is Flate-compressed, exactly
+// like a real text-based invoice PDF (scanned PDFs have no text operators).
+const ocrContent = [
+  'BT /F1 14 Tf 72 720 Td',
+  '(Invoice No: INV-2026-777) Tj',
+  '0 -24 Td (Sold by: Acme Traders) Tj',
+  '0 -24 Td (Date: 2026-02-15) Tj',
+  'ET'
+].join('\n');
+const ocrStream = zlib.deflateSync(Buffer.from(ocrContent, 'latin1'));
+const ocrPdf = Buffer.concat([
+  Buffer.from(`%PDF-1.4\n1 0 obj << /Length ${ocrStream.length} >>\nstream\n`, 'latin1'),
+  ocrStream,
+  Buffer.from('\nendstream\nendobj\ntrailer\n%%EOF\n', 'latin1')
+]);
+
+const ocrResp = await json('POST', '/api/invoices/ocr-preview', {
+  token: tokenA,
+  body: { file_name: 'invoice.pdf', file_data: b64(ocrPdf) }
+});
+check('OCR preview endpoint accepts a real PDF (200 + success)', ocrResp.status === 200 && ocrResp.data.success === true, JSON.stringify(ocrResp.data));
+check('OCR engine reported as pdf-zlib', ocrResp.data.ocr?.engine === 'pdf-zlib', JSON.stringify(ocrResp.data.ocr));
+check('OCR detects invoice number INV-2026-777', /INV-2026-777/.test(ocrResp.data.ocr?.invoice_number || ''), ocrResp.data.ocr?.invoice_number);
+check('OCR detects seller "Acme Traders"', /Acme Traders/.test(ocrResp.data.ocr?.seller || ''), ocrResp.data.ocr?.seller);
+check('OCR detects date 2026-02-15', ocrResp.data.ocr?.invoice_date === '2026-02-15', ocrResp.data.ocr?.invoice_date);
+
+const ocrNoAuth = await json('POST', '/api/invoices/ocr-preview', { body: { file_name: 'invoice.pdf', file_data: b64(ocrPdf) } });
+check('OCR preview requires authentication (401)', ocrNoAuth.status === 401, `status=${ocrNoAuth.status}`);
+
+// The OCR pass must never be a way in past upload validation: a text file
+// renamed .pdf is still rejected by magic bytes on the preview endpoint.
+const ocrFake = await json('POST', '/api/invoices/ocr-preview', { token: tokenA, body: { file_name: 'fake.pdf', file_data: b64(Buffer.from('plain text')) } });
+check('OCR preview validates the file like upload does (400)', ocrFake.status === 400, JSON.stringify(ocrFake.data));
+
+// Upload stores the OCR text when the client sends it (captured at preview time)
+const ocrUpload = await json('POST', `/api/products/${productsA[2]}/invoices`, {
+  token: tokenA,
+  body: {
+    file_name: 'invoice.pdf', file_data: b64(ocrPdf),
+    invoice_number: 'INV-2026-777', seller: 'Acme Traders', invoice_date: '2026-02-15',
+    ocr_text: 'Invoice No: INV-2026-777 Sold by: Acme Traders Date: 2026-02-15'
+  }
+});
+check('Upload with ocr_text saves (201)', ocrUpload.status === 201, JSON.stringify(ocrUpload.data));
+if (ocrUpload.data.invoice) createdInvoiceFiles.push(ocrUpload.data.invoice.file_path);
+const ocrRow = await prisma.invoices.findUnique({ where: { invoice_id: ocrUpload.data.invoice_id } });
+check('ocr_text + ocr_processed stored on the invoice row', ocrRow?.ocr_processed === true && /INV-2026-777/.test(ocrRow?.ocr_text || ''), `processed=${ocrRow?.ocr_processed}`);
+check('ocr_text is truncated to the 5000-char cap', (ocrRow?.ocr_text || '').length <= 5000, `len=${(ocrRow?.ocr_text || '').length}`);
+
+// Degraded path: PNG_BYTES is a header + zeros (not a real picture). The
+// tesseract engine may fail to decode it or read nothing — either way the
+// endpoint must return 200 with empty fields / a friendly error, never crash.
+const ocrDegraded = await json('POST', '/api/invoices/ocr-preview', {
+  token: tokenA,
+  body: { file_name: 'blank.png', file_data: b64(PNG_BYTES) }
+});
+check('Garbled image degrades gracefully (200, no crash)', ocrDegraded.status === 200 && ocrDegraded.data.success === true, JSON.stringify(ocrDegraded.data).slice(0, 200));
+check('Degraded OCR leaves the form fields empty for manual entry',
+      ocrDegraded.data.ocr.invoice_number === '' && ocrDegraded.data.ocr.seller === '' && ocrDegraded.data.ocr.invoice_date === '',
+      JSON.stringify({ n: ocrDegraded.data.ocr.invoice_number, s: ocrDegraded.data.ocr.seller, d: ocrDegraded.data.ocr.invoice_date }));
+
 // ── CLEANUP: remove test users (cascades products/invoices) + stray files ────
 for (const filePath of createdInvoiceFiles) {
   const abs = path.join(UPLOAD_DIR, filePath);
   await fsp.unlink(abs).catch(() => {});
 }
-const { prisma } = await import('./src/prisma.js');
 await prisma.users.deleteMany({ where: { email: { in: createdUserEmails } } });
 
 server.close();

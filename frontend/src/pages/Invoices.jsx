@@ -9,7 +9,7 @@ import { api } from '../services/api';
 import InvoiceUploader from '../components/InvoiceUploader';
 import InvoiceList from '../components/InvoiceList';
 import StatCard from '../components/StatCard';
-import { formatFileSize } from '../services/invoiceService';
+import { formatFileSize, getAllInvoices } from '../services/invoiceService';
 
 export default function Invoices() {
   const [products, setProducts] = useState([]);
@@ -18,30 +18,41 @@ export default function Invoices() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
-  const loadInvoices = useCallback(async () => {
+  // Part E: search & sort controls
+  const [searchText, setSearchText] = useState('');
+  const [searchField, setSearchField] = useState('all');
+  const [sortOrder, setSortOrder] = useState('');
+
+  const loadInvoices = useCallback(async (search = '', field = 'all', sort = '') => {
     try {
-      const data = await api.get('/api/invoices');
+      const data = await getAllInvoices({ search, field, sort });
       setInvoices(data.invoices || []);
     } catch (err) {
       setLoadError(err.message || 'Could not load invoices.');
+    } finally {
+      setLoading(false);
     }
   }, []);
 
+  // Re-run the search whenever a control changes (300 ms debounce while typing)
   useEffect(() => {
-    const loadEverything = async () => {
-      setLoading(true);
+    const timer = setTimeout(() => {
+      loadInvoices(searchText, searchField, sortOrder);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchText, searchField, sortOrder, loadInvoices]);
+
+  useEffect(() => {
+    const loadProducts = async () => {
       try {
         const productData = await api.get('/api/products');
         setProducts(productData.products || []);
-        await loadInvoices();
       } catch (err) {
-        setLoadError(err.message || 'Could not load your data.');
-      } finally {
-        setLoading(false);
+        setLoadError(err.message || 'Could not load your products.');
       }
     };
-    loadEverything();
-  }, [loadInvoices]);
+    loadProducts();
+  }, []);
 
   const selectedProduct = products.find((p) => String(p.product_id) === selectedProductId);
 
@@ -74,9 +85,49 @@ export default function Invoices() {
         </div>
       )}
 
+      {/* Part E: Search & Sort controls */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 2fr) minmax(160px, 1fr) minmax(160px, 1fr)', gap: '0.75rem', alignItems: 'end' }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>Search Invoices</label>
+            <input
+              className="form-control"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Type to search…"
+            />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>Search In</label>
+            <select
+              className="form-control"
+              value={searchField}
+              onChange={(e) => setSearchField(e.target.value)}
+            >
+              <option value="all">Everything</option>
+              <option value="invoice_number">Invoice Number</option>
+              <option value="seller">Seller</option>
+              <option value="product">Product Name</option>
+            </select>
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>Sort by Invoice Date</label>
+            <select
+              className="form-control"
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value)}
+            >
+              <option value="">Newest Uploads First</option>
+              <option value="date_desc">Date: Newest First</option>
+              <option value="date_asc">Date: Oldest First</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       {/* Summary strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-        <StatCard icon="🧾" label="Saved Invoices" value={invoices.length} />
+        <StatCard icon="🧾" label={searchText ? 'Matching Invoices' : 'Saved Invoices'} value={invoices.length} />
         <StatCard icon="💾" label="Storage Used" value={formatFileSize(totalStored)} />
         <StatCard icon="📦" label="Products Available" value={products.length} />
       </div>
@@ -116,7 +167,7 @@ export default function Invoices() {
                   key={selectedProductId}
                   productId={selectedProductId}
                   productLabel={selectedProduct?.name}
-                  onUploaded={loadInvoices}
+                  onUploaded={() => loadInvoices(searchText, searchField, sortOrder)}
                 />
               ) : (
                 <p className="upload-note">Select a product above to enable the upload form.</p>
@@ -133,12 +184,20 @@ export default function Invoices() {
 
           {invoices.length === 0 ? (
             <div className="empty-state" style={{ padding: '2rem 0' }}>
-              <div className="empty-icon">🧾</div>
-              <h3>No invoices yet</h3>
-              <p>Upload your first purchase receipt using the form on the left.</p>
+              <div className="empty-icon">{searchText ? '🔍' : '🧾'}</div>
+              <h3>{searchText ? 'No matching invoices' : 'No invoices yet'}</h3>
+              <p>
+                {searchText
+                  ? `Nothing matches "${searchText}". Try a different term or switch the "Search In" field.`
+                  : 'Upload your first purchase receipt using the form on the left.'}
+              </p>
             </div>
           ) : (
-            <InvoiceList invoices={invoices} showProduct onDeleted={loadInvoices} />
+            <InvoiceList
+              invoices={invoices}
+              showProduct
+              onDeleted={() => loadInvoices(searchText, searchField, sortOrder)}
+            />
           )}
         </div>
       </div>
