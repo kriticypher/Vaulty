@@ -136,6 +136,43 @@ export async function ocrExtract(file) {
 }
 
 /**
+ * Part F: downloads the logged-in user's invoices as a CSV file
+ * (GET /api/invoices/export streams text/csv with an attachment header).
+ */
+export async function downloadInvoicesCsv() {
+  const token = localStorage.getItem('vaultly_token') || '';
+  const response = await fetch(`${API_BASE}/api/invoices/export`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+
+  if (!response.ok) {
+    let message = 'Could not export the CSV.';
+    try {
+      const data = await response.json();
+      if (data.error) message = data.error;
+    } catch { /* not JSON — keep the default message */ }
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+
+  // Hand the streamed CSV to the browser as a normal file download.
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const match = /filename="([^"]+)"/.exec(disposition);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = match ? match[1] : 'vaultly-invoices.csv';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Fetches the actual invoice file as a Blob using the Authorization header
  * (never a plain <img src> URL, so the session token is always attached and
  * other users' files stay unreachable).

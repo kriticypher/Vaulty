@@ -9,7 +9,7 @@ import { api } from '../services/api';
 import InvoiceUploader from '../components/InvoiceUploader';
 import InvoiceList from '../components/InvoiceList';
 import StatCard from '../components/StatCard';
-import { formatFileSize, getAllInvoices } from '../services/invoiceService';
+import { formatFileSize, getAllInvoices, downloadInvoicesCsv } from '../services/invoiceService';
 
 export default function Invoices() {
   const [products, setProducts] = useState([]);
@@ -17,11 +17,26 @@ export default function Invoices() {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   // Part E: search & sort controls
   const [searchText, setSearchText] = useState('');
   const [searchField, setSearchField] = useState('all');
   const [sortOrder, setSortOrder] = useState('');
+
+  // Part F: CSV export
+  const handleExportCsv = async () => {
+    setExporting(true);
+    setExportError('');
+    try {
+      await downloadInvoicesCsv();
+    } catch (err) {
+      setExportError(err.message || 'Could not export the CSV.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const loadInvoices = useCallback(async (search = '', field = 'all', sort = '') => {
     try {
@@ -87,7 +102,7 @@ export default function Invoices() {
 
       {/* Part E: Search & Sort controls */}
       <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 2fr) minmax(160px, 1fr) minmax(160px, 1fr)', gap: '0.75rem', alignItems: 'end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 2fr) minmax(140px, 1fr) minmax(150px, 1fr) minmax(130px, auto)', gap: '0.75rem', alignItems: 'end' }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label>Search Invoices</label>
             <input
@@ -122,7 +137,24 @@ export default function Invoices() {
               <option value="date_asc">Date: Oldest First</option>
             </select>
           </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>&nbsp;</label>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleExportCsv}
+              disabled={exporting}
+              title="Download all your invoices as a CSV file"
+            >
+              {exporting ? '⏳ Exporting…' : '⬇️ Export CSV'}
+            </button>
+          </div>
         </div>
+        {exportError && (
+          <p className="upload-message upload-message-error" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+            ⚠️ {exportError}
+          </p>
+        )}
       </div>
 
       {/* Summary strip */}

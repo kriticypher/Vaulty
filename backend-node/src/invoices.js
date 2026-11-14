@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma.js';
+import { csvRow } from './csv.js';
 import { mergeSort } from './dsa.js';
 import { getProductById } from './products.js';
 
@@ -290,6 +291,54 @@ export async function uploadInvoice(productId, userId, data) {
     invoice_id: outcome.created.invoice_id,
     invoice: shapeInvoice(outcome.created)
   };
+}
+
+// ── PART F: CSV EXPORT (only the logged-in user's records) ───────────────────
+//
+// Column set deliberately EXCLUDES anything sensitive or internal:
+//   • No user credentials — password hashes / salts live in Users and are
+//     never selected here (the query cannot even reach them).
+//   • No auth material — session tokens live in the Sessions table, likewise
+//     never selected.
+//   • No internal columns — file_path, file_hash, ocr_text are server-side
+//     plumbing, not useful purchase information for the user.
+export async function exportInvoicesCsv(userId) {
+  const rows = await prisma.invoices.findMany({
+    where: { product: { user_id: userId } },
+    orderBy: [{ uploaded_at: 'desc' }],
+    include: {
+      product: {
+        select: { name: true, brand: true, category: true, price: true, purchase_date: true }
+      }
+    }
+  });
+
+  const header = [
+    'Invoice ID', 'Invoice Number', 'Seller', 'Invoice Date',
+    'Product Name', 'Product Brand', 'Product Category', 'Product Price',
+    'Product Purchase Date', 'File Name', 'File Size (bytes)',
+    'OCR Processed', 'Uploaded At'
+  ];
+
+  const lines = [csvRow(header)];
+  for (const inv of rows) {
+    lines.push(csvRow([
+      inv.invoice_id,
+      inv.invoice_number ?? '',
+      inv.seller ?? '',
+      inv.invoice_date ?? '',
+      inv.product.name,
+      inv.product.brand ?? '',
+      inv.product.category ?? '',
+      inv.product.price,
+      inv.product.purchase_date ?? '',
+      inv.original_filename ?? '',
+      inv.file_size ?? '',
+      inv.ocr_processed ? 'yes' : 'no',
+      inv.uploaded_at instanceof Date ? inv.uploaded_at.toISOString() : (inv.uploaded_at ?? '')
+    ]));
+  }
+  return lines.join('');
 }
 
 // ── QUERIES ──────────────────────────────────────────────────────────────────

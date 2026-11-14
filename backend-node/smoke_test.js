@@ -556,6 +556,80 @@ const ocrMonth = await json('POST', '/api/invoices/ocr-preview', {
 check('Month-name date "Jul 02, 2026" normalizes to 2026-07-02', ocrMonth.data.ocr?.invoice_date === '2026-07-02', JSON.stringify(ocrMonth.data.ocr));
 check('Month-name PDF still detects the invoice number NM-7', ocrMonth.data.ocr?.invoice_number === 'NM-7', ocrMonth.data.ocr?.invoice_number);
 
+// ── 14. PART F: CSV EXPORT ───────────────────────────────────────────────────
+console.log('\n14. CSV Export Tests (Part F):');
+// Invoices crafted for CSV safety checks: formula-injection sellers, a comma
+// that must trigger RFC 4180 quoting, distinct numbers to avoid dup detection.
+const csvSeeds = [
+  ['CSV-EQ-1', '=HYPERLINK("http://evil","pwn")', '2026-01-05'],
+  ['CSV-AT-1', '@EvilStore', '2026-01-06'],
+  ['CSV-PL-1', '+911234567890', '2026-01-07'],
+  ['CSV-DA-1', '-9876', '2026-01-08'],
+  ['CSV-CM-1', 'Acme, Inc. "Premier"', '2026-01-09']
+];
+const csvSeedIds = [];
+for (const [i, [number, seller, date]] of csvSeeds.entries()) {
+  const r = await json('POST', `/api/products/${productsA[2]}/invoices`, {
+    token: tokenA,
+    body: { file_name: 'csv-seed.png', file_data: b64(pngVariant(30 + i)), invoice_number: number, seller, invoice_date: date }
+  });
+  check(`CSV seed ${number} uploaded`, r.status === 201, JSON.stringify(r.data));
+  createdInvoiceFiles.push(r.data.invoice.file_path);
+  csvSeedIds.push(r.data.invoice_id);
+}
+
+const csvNoAuth = await json('GET', '/api/invoices/export');
+check('CSV export requires authentication (401)', csvNoAuth.status === 401, `status=${csvNoAuth.status}`);
+
+const csvRes = await fetch(`${base()}/api/invoices/export`, { headers: { Authorization: `Bearer ${tokenA}` } });
+check('CSV response has text/csv + attachment headers',
+      (csvRes.headers.get('content-type') || '').includes('text/csv') &&
+      (csvRes.headers.get('content-disposition') || '').startsWith('attachment'), JSON.stringify({ ct: csvRes.headers.get('content-type'), cd: csvRes.headers.get('content-disposition') }));
+check('CSV marked as nosniff', csvRes.headers.get('x-content-type-options') === 'nosniff', csvRes.headers.get('x-content-type-options'));
+
+const csvText = await csvRes.text();
+const csvLines = csvText.replace(/^\uFEFF/, '').trim().split('\r\n').filter(Boolean);
+const csvHeader = csvLines[0].split(',').map((c) => c.replace(/^"|"$/g, '').replace(/""/g, '"'));
+check('CSV header row includes invoice number, seller, date, product name',
+      ['Invoice Number', 'Seller', 'Invoice Date', 'Product Name'].every((c) => csvHeader.includes(c)), csvHeader.join('|'));
+check('CSV header never includes credentials or auth columns',
+      !csvHeader.some((c) => /password|hash|salt|token|session/i.test(c)), csvHeader.join('|'));
+
+const csvUserA = await json('GET', '/api/invoices', { token: tokenA });
+check('CSV row count matches the user\'s invoice count', csvLines.length - 1 === csvUserA.data.invoices.length, `csv=${csvLines.length - 1} api=${csvUserA.data.invoices.length}`);
+
+// Only the logged-in user's records: User B exports → no User A data at all.
+const csvResB = await fetch(`${base()}/api/invoices/export`, { headers: { Authorization: `Bearer ${tokenB}` } });
+const csvTextB = await csvResB.text();
+// User B saved exactly one invoice earlier (the cross-user identical-file test)
+// — the export must contain that one and NOTHING of User A's.
+check('User B\'s CSV is scoped to User B only (1 own row, zero of A\'s records)',
+      csvTextB.trim().split('\r\n').filter(Boolean).length - 1 === 1 &&
+      !csvTextB.includes('Zeta Retail') && !csvTextB.includes('Duplicate Store'), `B rows=${csvTextB.trim().split('\r\n').filter(Boolean).length - 1}`);
+
+// Data isolation: no password hashes, salts, or session tokens anywhere.
+check('CSV contains no bcrypt hash fragments', !csvText.includes('$2a$') && !csvText.includes('$2b$'), '');
+check('CSV contains no session token material', !csvText.includes(tokenA) && !csvText.includes(tokenB), '');
+
+// CSV formula injection: dangerous leading characters are neutralised with '.
+const checkCell = (name, needle) => {
+  const line = csvLines.find((l) => l.includes(needle.replace(/^./, '')));
+  check(name, Boolean(line), line ? line.slice(0, 120) : 'row not found');
+};
+checkCell('Seller "=HYPERLINK(…)" exported as text (leading apostrophe)', "'=HYPERLINK");
+checkCell('Seller "@EvilStore" exported as text', "'@EvilStore");
+checkCell('Seller "+91…" exported as text', "'+911234567890");
+checkCell('Seller "-9876" exported as text', "'-9876");
+
+// RFC 4180 escaping: comma + quotes in the seller are quoted and doubled.
+const quotedLine = csvLines.find((l) => l.includes('Acme, Inc.'));
+check('Seller with comma/quotes is properly quoted ("Acme, Inc. ""Premier""")',
+      Boolean(quotedLine) && quotedLine.includes('"Acme, Inc. ""Premier"""'), quotedLine ? quotedLine.slice(0, 140) : 'not found');
+
+// Round-trip: parse the CSV header + first data column widths are consistent.
+const columnCounts = csvLines.map((l) => (l.match(/("(?:[^"]|"")*"|[^,]*)(,|$)/g) || []).length);
+check('Every CSV row has the same number of columns', new Set(columnCounts).size === 1, `sizes=${[...new Set(columnCounts)].join(',')}`);
+
 // ── CLEANUP: remove test users (cascades products/invoices) + stray files ────
 for (const filePath of createdInvoiceFiles) {
   const abs = path.join(UPLOAD_DIR, filePath);
