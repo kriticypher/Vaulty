@@ -12,6 +12,9 @@ import { auth } from './routes/auth.routes.js';
 import { products } from './routes/products.routes.js';
 import { dashboard } from './routes/dashboard.routes.js';
 import { invoices } from './routes/invoices.routes.js';
+import { warranties } from './routes/warranties.routes.js';
+import { returns } from './routes/returns.routes.js';
+import { services } from './routes/services.routes.js';
 
 const PORT = 8000;
 
@@ -61,6 +64,9 @@ app.use('/api', auth);
 app.use('/api', products);
 app.use('/api', dashboard);
 app.use('/api', invoices);
+app.use('/api', warranties);
+app.use('/api', returns);
+app.use('/api', services);
 
 // ── ERROR HANDLING ────────────────────────────────────────────────────────────
 

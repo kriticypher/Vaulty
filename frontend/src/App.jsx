@@ -12,6 +12,9 @@ import InvoiceDetails from './pages/InvoiceDetails';
 import Analytics from './pages/Analytics';
 import Profile from './pages/Profile';
 import PlaceholderPage from './pages/PlaceholderPage';
+import Warranties from './pages/Warranties';
+import Returns from './pages/Returns';
+import ServiceHistory from './pages/ServiceHistory';
 import { authService } from './services/authService';
 import { api } from './services/api';
 
@@ -80,52 +83,9 @@ export default function App() {
               <Route path="/invoices/:id" element={<InvoiceDetails />} />
 
               {/* Shared integration placeholder routes for Member 3 */}
-              <Route
-                path="/warranties"
-                element={
-                  <PlaceholderPage
-                    title="Warranty Tracker"
-                    member="Member 3 (Warranties & Reminders)"
-                    description="Monitor active, expiring soon, and expired product warranties."
-                    plannedFeatures={[
-                      'Automatic expiry date calculation',
-                      'Active vs Expiring Soon (≤30 days) vs Expired status',
-                      'In-app reminders on application open',
-                      'Nearest expiry sorting'
-                    ]}
-                  />
-                }
-              />
-              <Route
-                path="/returns"
-                element={
-                  <PlaceholderPage
-                    title="Return Windows"
-                    member="Member 3 (Warranties & Reminders)"
-                    description="Track return deadlines and statuses for recently ordered items."
-                    plannedFeatures={[
-                      'Return deadline reminders (≤3 days remaining)',
-                      'Mark as Returned / Non-returnable',
-                      'Seller-specific custom return policy windows'
-                    ]}
-                  />
-                }
-              />
-              <Route
-                path="/service-history"
-                element={
-                  <PlaceholderPage
-                    title="Service & Repair History"
-                    member="Member 3 (Warranties & Reminders)"
-                    description="Log service records, maintenance fees, and repair center notes."
-                    plannedFeatures={[
-                      'Log maintenance dates and service center details',
-                      'Track individual repair costs',
-                      'Total maintenance expenditure per product'
-                    ]}
-                  />
-                }
-              />
+              <Route path="/warranties" element={<Warranties />} />
+              <Route path="/returns" element={<Returns />} />
+              <Route path="/service-history" element={<ServiceHistory />} />
 
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
