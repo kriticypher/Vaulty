@@ -187,7 +187,13 @@ export async function uploadInvoice(productId, userId, data) {
   //    concurrent identical upload cannot slip between the check and the
   //    insert (SQLite serializes writers; details in docs/INVOICES_API.md).
   //    `force: true` is the user's deliberate "save anyway" exception.
-  const duplicateCheckNeeded = !data.force && Boolean(seller && invoiceNumber);
+  //    Two duplicate signals, both per-user:
+  //      a. IDENTICAL FILE — the SHA-256 of the bytes matches an existing
+  //         invoice of the user (works even when metadata fields are empty,
+  //         so re-uploading the same document is always flagged);
+  //      b. SAME SELLER + INVOICE NUMBER (case-insensitive), when both given.
+  const fileHash = crypto.createHash('sha256').update(fileBytes).digest('hex');
+  const metadataCheckNeeded = Boolean(seller && invoiceNumber);
   const storedName = generateSafeFileName(userId, productId, extension);
   const userDirectory = path.join(UPLOAD_DIR, `u${userId}`);
   const absolutePath = path.join(userDirectory, storedName);
@@ -196,20 +202,35 @@ export async function uploadInvoice(productId, userId, data) {
   let outcome;
   try {
     outcome = await prisma.$transaction(async (tx) => {
-      if (duplicateCheckNeeded) {
-        // COLLATE NOCASE = the seller/invoice-number comparison is case-insensitive
-        const existing = await tx.$queryRaw`
+      if (!data.force) {
+        // (a) identical bytes (new rows carry a SHA-256), or for legacy rows
+        //     uploaded before hashing existed: same name AND same size.
+        const identicalFile = await tx.$queryRaw`
           SELECT i.invoice_id, i.invoice_number, i.seller, i.invoice_date,
-                 i.original_filename, i.uploaded_at, p.name AS product_name
+                 i.original_filename, i.uploaded_at, i.file_hash, p.name AS product_name
           FROM Invoices i
           JOIN Products p ON p.product_id = i.product_id
           WHERE p.user_id = ${userId}
-            AND i.invoice_number = ${invoiceNumber} COLLATE NOCASE
-            AND i.seller = ${seller} COLLATE NOCASE
+            AND (i.file_hash = ${fileHash}
+              OR (i.file_hash IS NULL AND i.file_size = ${fileBytes.length}
+                  AND i.original_filename = ${path.basename(originalName)} COLLATE NOCASE))
           LIMIT 1
         `;
-        if (existing.length > 0) {
-          return { duplicate: existing[0] };
+        const metadataExisting = metadataCheckNeeded
+          ? await tx.$queryRaw`
+              SELECT i.invoice_id, i.invoice_number, i.seller, i.invoice_date,
+                     i.original_filename, i.uploaded_at, i.file_hash, p.name AS product_name
+              FROM Invoices i
+              JOIN Products p ON p.product_id = i.product_id
+              WHERE p.user_id = ${userId}
+                AND i.invoice_number = ${invoiceNumber} COLLATE NOCASE
+                AND i.seller = ${seller} COLLATE NOCASE
+              LIMIT 1
+            `
+          : [];
+        const match = identicalFile[0] || metadataExisting[0];
+        if (match) {
+          return { duplicate: match, reason: identicalFile[0] ? 'identical_file' : 'same_seller_and_number' };
         }
       }
 
@@ -227,7 +248,8 @@ export async function uploadInvoice(productId, userId, data) {
           file_size: fileBytes.length,
           mime_type: MIME_MAP[extension], // O(1) dictionary lookup
           ocr_text: ocrText || null,
-          ocr_processed: ocrProcessed
+          ocr_processed: ocrProcessed,
+          file_hash: fileHash
         },
         include: { product: { select: { name: true } } }
       });
@@ -242,10 +264,17 @@ export async function uploadInvoice(productId, userId, data) {
   // 9. Duplicate found: do NOT save; hand the existing record back so the UI
   //    can warn the user and let them review it or save anyway explicitly.
   if (outcome.duplicate) {
+    const messages = {
+      identical_file:
+        `Duplicate upload: you already saved this exact file as "${outcome.duplicate.original_filename || 'an invoice'}". Review it, or confirm to save anyway.`,
+      same_seller_and_number:
+        `Possible duplicate: an invoice from "${seller}" with number "${invoiceNumber}" already exists. Review it, or confirm to save anyway.`
+    };
     return {
       success: false,
       duplicate: true,
-      error: `Possible duplicate: an invoice from "${seller}" with number "${invoiceNumber}" already exists. Review it, or confirm to save anyway.`,
+      duplicate_reason: outcome.reason,
+      error: messages[outcome.reason],
       existing_invoice: {
         ...outcome.duplicate,
         uploaded_at: outcome.duplicate.uploaded_at

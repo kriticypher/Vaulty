@@ -181,12 +181,19 @@ user already has an invoice with the **same seller AND same invoice number**
 (case-insensitive). The check runs on the server, never only in the browser.
 
 **Rules:**
-- The check only runs when **both** `seller` and `invoice_number` are provided
-  (with either one missing there is nothing reliable to compare).
-- Comparison is **case-insensitive** (`COLLATE NOCASE`): `"amazon"` matches `"Amazon"`.
-- The check is **per-user** (scoped through the `Products` join), so the same
-  seller/number for two different users is never flagged.
-- Different seller + same number, or vice versa, is **not** a duplicate.
+- The check runs on two signals, both **per-user** (scoped through the `Products` join):
+  1. **Identical file** — the SHA-256 of the uploaded bytes matches an invoice the
+     user already saved (`file_hash` column, indexed). This works even when the
+     metadata fields are empty, so re-uploading the same document — renamed or
+     not — is always flagged. Legacy rows uploaded before hashing existed fall
+     back to matching same user + same original filename + same size.
+  2. **Same seller AND same invoice number** (case-insensitive, `COLLATE NOCASE`)
+     — only when both fields are provided.
+- The response names which signal fired via `duplicate_reason`:
+  `identical_file` or `same_seller_and_number`.
+- Different seller + same number, or vice versa, is **not** a metadata duplicate
+  (the identical-file rule may still catch it if the bytes are the same).
+- The same file for a **different** user is never flagged.
 
 **When a possible duplicate exists** — nothing is saved, and the API returns:
 
@@ -354,13 +361,22 @@ but **nothing is stored**. The response pre-fills the upload form:
 
 | File type | Engine | How it works |
 |---|---|---|
-| PDF | `pdf-zlib` (hand-written, zero dependencies) | Locates every `stream…endstream` payload, inflates FlateDecode streams with Node's built-in `zlib`, and pulls the text out of PDF text-show operators (`(text) Tj`, `[(t)(e)(xt)] TJ`). Scanned/image-only PDFs have no text operators → empty result, user types manually. |
+| PDF — simple fonts | `pdf-zlib` (hand-written, zero dependencies) | Locates every `stream…endstream` payload, inflates FlateDecode streams with Node's built-in `zlib`, and pulls the text out of the `BT…ET` blocks: `(text) Tj` literals and `[…] TJ` arrays. |
+| PDF — CID/Identity-H fonts | `pdf-zlib` + ToUnicode | Billing tools often store text as **hex glyph codes** (`<00310057…> Tj`) instead of literals. The extractor decodes each 2-byte glyph code through the font's `/ToUnicode` CMap (`bfchar` + `bfrange` entries), rebuilding words like `Pranav Thawait`. Literal and hex fragments are joined intelligently (spaces between literal operands, none between hex glyph fragments). |
+| PDF — scanned | `pdf-image-ocr` | When a PDF carries no text operators at all, its embedded JPEG images (`DCTDecode`, size-filtered to skip logos) are extracted and pushed through tesseract.js. |
 | JPG / PNG | `tesseract.js` (pure WebAssembly Tesseract) | OCR in a worker thread; the English language data is downloaded once and cached. |
+
+Real-world verification: this pipeline reads an actual Indiefolio GST invoice
+(CID fonts, Identity-H) correctly — extracting `Invoice No: PT00001`,
+the issuer name and the date `Jul 02, 2026 → 2026-07-02`.
 
 **Field heuristics** (`src/ocr.js`): labeled patterns (`Invoice No:`, `Bill #`,
 `Sold by:`, `Merchant:` …), a bare `INV-…` code fallback for numbers, and a date
-normalizer that accepts `YYYY-MM-DD`, `YYYY/MM/DD` and `DD/MM/YYYY` (when the
-first number can't be a day it assumes `MM/DD/YYYY`) → always emits `YYYY-MM-DD`.
+normalizer that accepts `YYYY-MM-DD`, `YYYY/MM/DD`, `DD/MM/YYYY`, and month-name
+formats (`Jul 02, 2026`, `15-Jul-2026`) → always emits `YYYY-MM-DD`. The seller
+fallback (first text line) rejects operator-looking junk (e.g. PDF drawing
+operators like `.24 0 0 -.24 0 842.88 cm`) by requiring a letter-led, letter-heavy
+line.
 
 **Frontend flow** (`InvoiceUploader.jsx`): the moment a valid file is selected,
 `ocrExtract()` sends it to the preview endpoint and auto-fills **only the empty
@@ -418,9 +434,13 @@ Part C adds explicit product-linking tests plus cookie/session/duplicate tests
 number/seller/product (case-insensitive, per-user scope), `date_asc`/`date_desc`
 ordering with undated invoices last, search+sort combination, bcrypt prefix +
 cost-factor verification, a synthetic legacy PBKDF2 row logging in and being
-upgraded, OCR field detection on a real Flate-compressed PDF, validation parity
-with upload, `ocr_text` storage/truncation, and the degraded-garbage-image path —
-**90 total, all passing** (`npm test` from `backend-node/`).
+upgraded, OCR field detection on a real Flate PDF AND on a synthetic
+CID/Identity-H PDF (ToUnicode decoding), month-name date normalization,
+validation parity with upload, `ocr_text` storage/truncation, exact-file
+duplicate rejection (`duplicate_reason: identical_file`, force exception,
+cross-user isolation, stored hash verification), and the
+degraded-garbage-image path — **101 total, all passing** (`npm test` from
+`backend-node/`).
 
 Note: tesseract.js downloads its English language data on first use (needs
 internet once); until then image OCR degrades to the manual-entry path while
