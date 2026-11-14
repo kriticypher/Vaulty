@@ -860,3 +860,50 @@ body {
   box-shadow: var(--shadow-md);
   margin-bottom: 0.5rem;
 }
+
+/* ── Member 2: Duplicate Invoice Warning ────────────────────────────────── */
+.duplicate-warning {
+  background-color: var(--warning-bg);
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.duplicate-warning-title {
+  font-weight: 700;
+  color: #b45309;
+  margin-bottom: 0.25rem;
+}
+
+.duplicate-warning-text {
+  font-size: 0.88rem;
+  color: #92400e;
+  margin-bottom: 0.75rem;
+}
+
+.duplicate-existing {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.duplicate-existing-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.duplicate-existing-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.duplicate-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}

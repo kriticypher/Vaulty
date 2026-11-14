@@ -219,6 +219,87 @@ const relinkOwn = await json('PUT', `/api/invoices/${linkInvoice.data.invoice_id
 });
 check('Re-linking to own product succeeds', relinkOwn.status === 200 && relinkOwn.data.invoice.product_id === productsA[2], JSON.stringify(relinkOwn.data));
 
+// ── 9. COOKIES & 7-DAY SESSIONS ──────────────────────────────────────────────
+console.log('\n9. Cookie & Session Tests:');
+const cookieLogin = await fetch(`${base()}/api/login`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: emailA, password: 'password1' })
+});
+const setCookie = cookieLogin.headers.get('set-cookie') || '';
+check('Login sets HttpOnly session cookie with 7-day Max-Age',
+      setCookie.includes('vaultly_session=') && setCookie.includes('HttpOnly') && setCookie.includes('Max-Age=604800'),
+      setCookie);
+const cookieToken = /vaultly_session=([^;]+)/.exec(setCookie)?.[1];
+
+const meViaCookie = await json('GET', '/api/me', { token: cookieToken });
+check('Session authenticates via Bearer fallback', meViaCookie.status === 200, JSON.stringify(meViaCookie.data));
+
+const meViaCookieHeader = await fetch(`${base()}/api/me`, {
+  headers: { Cookie: `vaultly_session=${cookieToken}` }
+});
+check('Session authenticates via cookie (no Authorization header)', meViaCookieHeader.status === 200, `status=${meViaCookieHeader.status}`);
+
+const badCookie = await fetch(`${base()}/api/me`, { headers: { Cookie: 'vaultly_session=forged-token-value' } });
+check('Forged/unknown cookie rejected (401)', badCookie.status === 401, `status=${badCookie.status}`);
+
+const cookieLogout = await fetch(`${base()}/api/logout`, { method: 'POST', headers: { Cookie: `vaultly_session=${cookieToken}` } });
+const logoutCookie = cookieLogout.headers.get('set-cookie') || '';
+check('Logout clears the session cookie (Max-Age=0)', logoutCookie.includes('Max-Age=0'), logoutCookie);
+const meAfterLogout = await fetch(`${base()}/api/me`, { headers: { Cookie: `vaultly_session=${cookieToken}` } });
+check('Session token invalid after logout', meAfterLogout.status === 401, `status=${meAfterLogout.status}`);
+
+// ── 10. DUPLICATE INVOICE DETECTION ──────────────────────────────────────────
+console.log('\n10. Duplicate Detection Tests:');
+const dupUpload = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'first.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
+});
+check('First invoice with seller+number saves', dupUpload.status === 201, JSON.stringify(dupUpload.data));
+createdInvoiceFiles.push(dupUpload.data.invoice.file_path);
+
+const userAId = loginA.data.user.user_id;
+const userUploadsDir = path.join(UPLOAD_DIR, `u${userAId}`);
+const fileCountBefore = (await fsp.readdir(userUploadsDir)).length;
+
+const dupRepeat = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'second.png', file_data: b64(PNG_BYTES), invoice_number: 'inv-dup-1', seller: 'duplicate STORE' }
+});
+check('Same seller+number (case-insensitive) rejected with 409 + duplicate flag',
+      dupRepeat.status === 409 && dupRepeat.data.duplicate === true &&
+      dupRepeat.data.existing_invoice.invoice_id === dupUpload.data.invoice_id, JSON.stringify(dupRepeat.data));
+
+const fileCountAfter = (await fsp.readdir(userUploadsDir)).length;
+check('Rejected duplicate stored NO file on disk', fileCountAfter === fileCountBefore, `before=${fileCountBefore} after=${fileCountAfter}`);
+
+const dupDifferent = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'third.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Different Store' }
+});
+check('Same number but DIFFERENT seller is not a duplicate', dupDifferent.status === 201, JSON.stringify(dupDifferent.data));
+createdInvoiceFiles.push(dupDifferent.data.invoice.file_path);
+
+const dupForce = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'fourth.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store', force: true }
+});
+check('force:true saves the deliberate duplicate exception', dupForce.status === 201, JSON.stringify(dupForce.data));
+createdInvoiceFiles.push(dupForce.data.invoice.file_path);
+
+const dupMissingFields = await json('POST', `/api/products/${productsA[1]}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'fifth.png', file_data: b64(PNG_BYTES) } // no seller/number → no check possible
+});
+check('Uploads without seller+number skip the duplicate check', dupMissingFields.status === 201, JSON.stringify(dupMissingFields.data));
+createdInvoiceFiles.push(dupMissingFields.data.invoice.file_path);
+
+const dupForeign = await json('POST', `/api/products/${prodB.data.product_id}/invoices`, {
+  token: tokenA,
+  body: { file_name: 'sixth.png', file_data: b64(PNG_BYTES), invoice_number: 'INV-DUP-1', seller: 'Duplicate Store' }
+});
+check('Duplicate scope is per-user: User A invoice invisible to User B upload', dupForeign.status === 400, JSON.stringify(dupForeign.data));
+
 // ── CLEANUP: remove test users (cascades products/invoices) + stray files ────
 for (const filePath of createdInvoiceFiles) {
   const abs = path.join(UPLOAD_DIR, filePath);

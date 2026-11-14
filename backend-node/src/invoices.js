@@ -99,7 +99,7 @@ function shapeInvoice(invoice) {
   return { ...rest, product_name: product ? product.name : null };
 }
 
-// ── CORE: UPLOAD (Base64 JSON transfer format) ───────────────────────────────
+// ── CORE: UPLOAD (Base64 JSON transfer format + duplicate detection) ────────
 
 export async function uploadInvoice(productId, userId, data) {
   // 1. Ownership check: the invoice must attach to a product the user owns.
@@ -161,45 +161,82 @@ export async function uploadInvoice(productId, userId, data) {
     return { success: false, error: 'Invoice date must use the YYYY-MM-DD format.' };
   }
 
-  // 8. Save the bytes under uploads/u{userId}/ with a generated safe name.
+  // 8. Duplicate check + save happen inside ONE database transaction so a
+  //    concurrent identical upload cannot slip between the check and the
+  //    insert (SQLite serializes writers; details in docs/INVOICES_API.md).
+  //    `force: true` is the user's deliberate "save anyway" exception.
+  const duplicateCheckNeeded = !data.force && Boolean(seller && invoiceNumber);
   const storedName = generateSafeFileName(userId, productId, extension);
   const userDirectory = path.join(UPLOAD_DIR, `u${userId}`);
   const absolutePath = path.join(userDirectory, storedName);
   const relativePath = path.join(`u${userId}`, storedName);
 
+  let outcome;
   try {
-    await fsp.mkdir(userDirectory, { recursive: true });
-    await fsp.writeFile(absolutePath, fileBytes);
-  } catch {
-    return { success: false, error: 'Server could not store the file. Please try again.' };
-  }
+    outcome = await prisma.$transaction(async (tx) => {
+      if (duplicateCheckNeeded) {
+        // COLLATE NOCASE = the seller/invoice-number comparison is case-insensitive
+        const existing = await tx.$queryRaw`
+          SELECT i.invoice_id, i.invoice_number, i.seller, i.invoice_date,
+                 i.original_filename, i.uploaded_at, p.name AS product_name
+          FROM Invoices i
+          JOIN Products p ON p.product_id = i.product_id
+          WHERE p.user_id = ${userId}
+            AND i.invoice_number = ${invoiceNumber} COLLATE NOCASE
+            AND i.seller = ${seller} COLLATE NOCASE
+          LIMIT 1
+        `;
+        if (existing.length > 0) {
+          return { duplicate: existing[0] };
+        }
+      }
 
-  // 9. Record the invoice in the shared database (Prisma = parameterized SQL).
-  try {
-    const created = await prisma.invoices.create({
-      data: {
-        product_id: productId,
-        invoice_number: invoiceNumber || null,
-        seller: seller || null,
-        invoice_date: invoiceDate || null,
-        file_path: relativePath,
-        original_filename: path.basename(originalName), // display-only
-        file_size: fileBytes.length,
-        mime_type: MIME_MAP[extension] // O(1) dictionary lookup
-      },
-      include: { product: { select: { name: true } } }
+      await fsp.mkdir(userDirectory, { recursive: true });
+      await fsp.writeFile(absolutePath, fileBytes);
+
+      const created = await tx.invoices.create({
+        data: {
+          product_id: productId,
+          invoice_number: invoiceNumber || null,
+          seller: seller || null,
+          invoice_date: invoiceDate || null,
+          file_path: relativePath,
+          original_filename: path.basename(originalName), // display-only
+          file_size: fileBytes.length,
+          mime_type: MIME_MAP[extension] // O(1) dictionary lookup
+        },
+        include: { product: { select: { name: true } } }
+      });
+      return { created };
     });
-    return {
-      success: true,
-      message: 'Invoice uploaded successfully.',
-      invoice_id: created.invoice_id,
-      invoice: shapeInvoice(created)
-    };
   } catch (err) {
-    // Database insert failed: remove the orphan file so no garbage is left.
+    // Transaction failed (e.g. DB error after the file was written): clean up
     await fsp.unlink(absolutePath).catch(() => {});
     return { success: false, error: `Database insertion failed: ${err.message}` };
   }
+
+  // 9. Duplicate found: do NOT save; hand the existing record back so the UI
+  //    can warn the user and let them review it or save anyway explicitly.
+  if (outcome.duplicate) {
+    return {
+      success: false,
+      duplicate: true,
+      error: `Possible duplicate: an invoice from "${seller}" with number "${invoiceNumber}" already exists. Review it, or confirm to save anyway.`,
+      existing_invoice: {
+        ...outcome.duplicate,
+        uploaded_at: outcome.duplicate.uploaded_at
+          ? outcome.duplicate.uploaded_at.toISOString()
+          : null
+      }
+    };
+  }
+
+  return {
+    success: true,
+    message: 'Invoice uploaded successfully.',
+    invoice_id: outcome.created.invoice_id,
+    invoice: shapeInvoice(outcome.created)
+  };
 }
 
 // ── QUERIES ──────────────────────────────────────────────────────────────────

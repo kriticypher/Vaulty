@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import fs from 'node:fs';
-import { getUserIdFromToken } from '../auth.js';
+import { getUserIdFromRequest } from '../auth.js';
 import {
   uploadInvoice,
   getAllInvoices,
@@ -21,8 +21,8 @@ function getBearerToken(req) {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 }
 
-function requireUser(req, res, message = 'Authentication required. Please login.') {
-  const userId = getUserIdFromToken(getBearerToken(req));
+async function requireUser(req, res, message = 'Authentication required. Please login.') {
+  const userId = await getUserIdFromRequest(req);
   if (!userId) {
     res.status(401).json({ error: message });
     return null;
@@ -32,14 +32,14 @@ function requireUser(req, res, message = 'Authentication required. Please login.
 
 // ── GET /api/invoices — every invoice owned by the logged-in user ────────────
 invoices.get('/invoices', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
   return res.json({ invoices: await getAllInvoices(userId) });
 });
 
 // ── GET /api/products/:id/invoices — invoices linked to one owned product ────
 invoices.get('/products/:id/invoices', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const productId = Number(req.params.id);
@@ -51,7 +51,7 @@ invoices.get('/products/:id/invoices', async (req, res) => {
 
 // ── POST /api/products/:id/invoices — Base64 JSON upload ─────────────────────
 invoices.post('/products/:id/invoices', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const productId = Number(req.params.id);
@@ -60,12 +60,13 @@ invoices.post('/products/:id/invoices', async (req, res) => {
   }
 
   const result = await uploadInvoice(productId, userId, req.body || {});
-  return res.status(result.success ? 201 : 400).json(result);
+  const statusCode = result.success ? 201 : (result.duplicate ? 409 : 400);
+  return res.status(statusCode).json(result);
 });
 
 // ── GET /api/invoices/:id/download — stream the stored file ──────────────────
 invoices.get('/invoices/:id/download', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const invoiceId = Number(req.params.id);
@@ -98,7 +99,7 @@ invoices.get('/invoices/:id/download', async (req, res) => {
 
 // ── GET /api/invoices/:id — open one invoice's full details ──────────────────
 invoices.get('/invoices/:id', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const invoiceId = Number(req.params.id);
@@ -115,7 +116,7 @@ invoices.get('/invoices/:id', async (req, res) => {
 
 // ── PUT /api/invoices/:id — edit invoice information ─────────────────────────
 invoices.put('/invoices/:id', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const invoiceId = Number(req.params.id);
@@ -129,7 +130,7 @@ invoices.put('/invoices/:id', async (req, res) => {
 
 // ── DELETE /api/invoices/:id — remove record + stored file ───────────────────
 invoices.delete('/invoices/:id', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const invoiceId = Number(req.params.id);

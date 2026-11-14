@@ -1,16 +1,17 @@
-// auth.js - Authentication module for Vaultly (Node.js port of Member 1's auth.py).
+// auth.js - Authentication module for Vaultly (Node.js).
 // Password hashing with PBKDF2-HMAC-SHA256 (100,000 iterations) using Node's
 // built-in crypto module — no bcrypt dependency needed.
-// Session tokens are 256-bit cryptographically secure random values stored in
-// an in-memory Map (same design as the Python backend, easy to explain in a viva).
+//
+// SESSIONS: tokens are stored in the Sessions table with a 7-day expiry and
+// delivered to the browser in an HttpOnly cookie. Because they live in the
+// DATABASE (not in server memory), they survive server restarts — the user
+// stays logged in until the cookie expires or they log out.
 
 import crypto from 'node:crypto';
 import { prisma } from './prisma.js';
 
-// In-memory session store: token (string) -> user_id (number)
-export const sessions = new Map();
-
 const SESSION_TOKEN_BYTES = 32;
+export const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 export function hashPassword(password, salt) {
   // PBKDF2 is intentionally slow to resist brute-force and rainbow-table attacks.
@@ -79,28 +80,79 @@ export async function loginUser(email, password) {
     return { success: false, error: 'Invalid email or password.' };
   }
 
+  // Housekeeping: purge this user's expired sessions
+  await prisma.sessions.deleteMany({ where: { user_id: user.user_id, expires_at: { lte: new Date() } } });
+
+  // Create a persistent 7-day session (stored in the database)
   const token = crypto.randomBytes(SESSION_TOKEN_BYTES).toString('hex');
-  sessions.set(token, user.user_id);
+  const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
+  await prisma.sessions.create({ data: { token, user_id: user.user_id, expires_at: expiresAt } });
 
   return {
     success: true,
-    token,
+    token, // still returned for non-browser clients; browsers use the cookie
     user: { user_id: user.user_id, name: user.name, email: user.email }
   };
 }
 
-export function logoutUser(token) {
-  if (token && sessions.has(token)) {
-    sessions.delete(token);
+export async function logoutUser(token) {
+  if (token) {
+    await prisma.sessions.deleteMany({ where: { token } });
   }
   return { success: true, message: 'Logged out successfully.' };
 }
 
-export function getUserIdFromToken(token) {
+/**
+ * Resolves the authenticated user_id from a request.
+ * Priority: Authorization: Bearer header (API/mobile clients) →
+ * vaultly_session cookie (browser). Expired sessions are deleted.
+ */
+export async function getUserIdFromRequest(req) {
+  let token = '';
+  const header = req.headers.authorization || '';
+  if (header.startsWith('Bearer ')) {
+    token = header.slice(7).trim();
+  } else {
+    // tiny inline cookie scan to avoid a parser dependency
+    for (const part of (req.headers.cookie || '').split(';')) {
+      const [key, ...rest] = part.trim().split('=');
+      if (key === 'vaultly_session') {
+        token = decodeURIComponent(rest.join('='));
+        break;
+      }
+    }
+  }
   if (!token) {
     return null;
   }
-  return sessions.get(token) ?? null;
+
+  const session = await prisma.sessions.findUnique({
+    where: { token },
+    select: { user_id: true, expires_at: true }
+  });
+  if (!session) {
+    return null;
+  }
+  if (session.expires_at.getTime() <= Date.now()) {
+    await prisma.sessions.deleteMany({ where: { token } });
+    return null;
+  }
+  return session.user_id;
+}
+
+// Backwards-compatible alias for code that already has a token string
+export async function getUserIdFromToken(token) {
+  if (!token) {
+    return null;
+  }
+  const session = await prisma.sessions.findUnique({
+    where: { token },
+    select: { user_id: true, expires_at: true }
+  });
+  if (!session || session.expires_at.getTime() <= Date.now()) {
+    return null;
+  }
+  return session.user_id;
 }
 
 export async function getUserProfile(userId) {

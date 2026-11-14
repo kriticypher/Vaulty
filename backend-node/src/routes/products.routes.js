@@ -1,7 +1,7 @@
 // products.routes.js - Product CRUD endpoints (Node.js port of Member 1's routes).
 
 import { Router } from 'express';
-import { getUserIdFromToken } from '../auth.js';
+import { getUserIdFromRequest } from '../auth.js';
 import {
   addProduct,
   getAllProducts,
@@ -12,13 +12,8 @@ import {
 
 export const products = Router();
 
-function getBearerToken(req) {
-  const header = req.headers.authorization || '';
-  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-}
-
-function requireUser(req, res) {
-  const userId = getUserIdFromToken(getBearerToken(req));
+async function requireUser(req, res) {
+  const userId = await getUserIdFromRequest(req);
   if (!userId) {
     res.status(401).json({ error: 'Authentication required. Please login.' });
     return null;
@@ -28,7 +23,7 @@ function requireUser(req, res) {
 
 // GET /api/products — search / filter / sort (DSA algorithms inside)
 products.get('/products', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const minPrice = req.query.min_price ? Number(req.query.min_price) : null;
@@ -46,7 +41,7 @@ products.get('/products', async (req, res) => {
 
 // POST /api/products
 products.post('/products', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const result = await addProduct(userId, req.body || {});
@@ -55,7 +50,7 @@ products.post('/products', async (req, res) => {
 
 // GET /api/products/:id — details with linked records (Members 2 & 3)
 products.get('/products/:id', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const productId = Number(req.params.id);
@@ -72,7 +67,7 @@ products.get('/products/:id', async (req, res) => {
 
 // PUT /api/products/:id
 products.put('/products/:id', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const productId = Number(req.params.id);
@@ -86,7 +81,7 @@ products.put('/products/:id', async (req, res) => {
 
 // DELETE /api/products/:id (cascades to linked records)
 products.delete('/products/:id', async (req, res) => {
-  const userId = requireUser(req, res);
+  const userId = await requireUser(req, res);
   if (!userId) return;
 
   const productId = Number(req.params.id);

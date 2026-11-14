@@ -22,6 +22,18 @@ model Users {
   salt          String
   created_at    DateTime   @default(now())
   products      Products[]
+  sessions      Sessions[]
+}
+
+// ── Auth: persistent sessions (7-day cookie sessions, survive server restarts) ──
+model Sessions {
+  token      String   @id // 256-bit random hex
+  user_id    Int
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user       Users    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id])
 }
 
 // ── Member 1: Product Management ─────────────────────────────────────────────

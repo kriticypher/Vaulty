@@ -72,15 +72,17 @@ export function formatFileSize(bytes) {
 /**
  * Uploads one invoice using the documented Base64 JSON transfer format:
  * POST /api/products/{productId}/invoices
+ * `force: true` is the explicit "save anyway" confirmation for duplicates.
  */
-export async function uploadInvoice(productId, metadata, file) {
+export async function uploadInvoice(productId, metadata, file, force = false) {
   const fileData = await fileToBase64(file);
   return api.post(`/api/products/${productId}/invoices`, {
     file_name: file.name,
     file_data: fileData,
     invoice_number: metadata.invoice_number || '',
     seller: metadata.seller || '',
-    invoice_date: metadata.invoice_date || ''
+    invoice_date: metadata.invoice_date || '',
+    force
   });
 }
 
@@ -120,7 +122,8 @@ export function deleteInvoice(invoiceId) {
 export async function fetchInvoiceBlob(invoiceId) {
   const token = localStorage.getItem('vaultly_token') || '';
   const response = await fetch(`${API_BASE}/api/invoices/${invoiceId}/download`, {
-    headers: { 'Authorization': `Bearer ${token}` }
+    headers: { 'Authorization': `Bearer ${token}` },
+    credentials: 'include' // cookie session also authenticates this call
   });
   if (!response.ok) {
     let message = 'Could not load the invoice file.';

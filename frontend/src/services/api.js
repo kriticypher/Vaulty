@@ -14,6 +14,7 @@ function getToken() {
 async function request(method, path, body = null) {
   const options = {
     method,
+    credentials: 'include', // send the HttpOnly session cookie on every call
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${getToken()}`
@@ -28,7 +29,11 @@ async function request(method, path, body = null) {
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data.error || 'API request failed.');
+    // Rich error: callers can inspect .status and .data (e.g. duplicate warnings)
+    const error = new Error(data.error || 'API request failed.');
+    error.status = response.status;
+    error.data = data;
+    throw error;
   }
 
   return data;

@@ -64,13 +64,12 @@ bookkeeping columns added by `ensure_invoice_schema()`.
 
 ## 2. Upload Transfer Format (Base64 JSON)
 
-`http.server` has no `multipart/form-data` parser in the standard library, so uploads
-use a documented JSON envelope. The frontend reads the file with
-`FileReader.readAsDataURL()` and sends only the Base64 payload:
+`POST /api/products/{id}/invoices` accepts a documented JSON envelope. The frontend reads the
+file with `FileReader.readAsDataURL()` and sends only the Base64 payload:
 
 ```http
 POST /api/products/3/invoices
-Authorization: Bearer <token>
+Authorization: Bearer <token>      (or the vaultly_session cookie)
 Content-Type: application/json
 ```
 
@@ -80,7 +79,8 @@ Content-Type: application/json
   "file_data": "JVBERi0xLjQK...",
   "invoice_number": "INV-2026-001",
   "seller": "Amazon",
-  "invoice_date": "2026-02-15"
+  "invoice_date": "2026-02-15",
+  "force": false
 }
 ```
 
@@ -90,6 +90,7 @@ Notes:
 - **Size is enforced BEFORE decoding**: the encoded string may not exceed
   `ceil(5 MB / 3) * 4 ≈ 6.99 MB` characters, and the whole request body is capped
   at 7 MB (`Content-Length > 7 MB` returns `413` before the body is even read).
+- `force: true` is the deliberate "save anyway" exception for duplicate detection (§7).
 
 Success (`201 Created`):
 ```json
@@ -173,7 +174,115 @@ Files live in `backend/uploads/u{user_id}/...` and are git-ignored.
 
 ---
 
-## 7. Testing
+## 7. Duplicate Invoice Detection (backend-enforced)
+
+The backend checks — inside the upload transaction, before saving — whether the same
+user already has an invoice with the **same seller AND same invoice number**
+(case-insensitive). The check runs on the server, never only in the browser.
+
+**Rules:**
+- The check only runs when **both** `seller` and `invoice_number` are provided
+  (with either one missing there is nothing reliable to compare).
+- Comparison is **case-insensitive** (`COLLATE NOCASE`): `"amazon"` matches `"Amazon"`.
+- The check is **per-user** (scoped through the `Products` join), so the same
+  seller/number for two different users is never flagged.
+- Different seller + same number, or vice versa, is **not** a duplicate.
+
+**When a possible duplicate exists** — nothing is saved, and the API returns:
+
+`409 Conflict`
+```json
+{
+  "success": false,
+  "duplicate": true,
+  "error": "Possible duplicate: an invoice from \"Amazon\" with number \"INV-2026-001\" already exists. Review it, or confirm to save anyway.",
+  "existing_invoice": { "invoice_id": 12, "invoice_number": "INV-2026-001", "seller": "Amazon", "invoice_date": "2026-02-15", "original_filename": "receipt.pdf", "uploaded_at": "..." }
+}
+```
+
+The frontend (`InvoiceUploader.jsx`) turns this into a warning card showing the existing
+record with three choices:
+1. **Review Existing** → opens the invoice details page (`/invoices/{id}`)
+2. **Save Anyway (I confirm)** → retries the same upload with `force: true`
+3. **Cancel** → nothing is stored
+
+`force: true` is the only way past the check, and it only ever comes from an explicit
+user confirmation — an accidental double-click or a retried request cannot create a
+duplicate silently. Note the normal submit button is replaced by this warning card,
+so the accidental path (plain re-submit) still hits the check.
+
+**No file is written when a duplicate is rejected** — the file save and the row insert
+both happen inside the same transaction, after the duplicate check passes.
+
+### How the duplicate check works (implementation)
+
+```
+prisma.$transaction(async (tx) => {
+  1. if (!force && seller && invoice_number)
+       SELECT ... FROM Invoices i JOIN Products p ...
+       WHERE p.user_id = :me
+         AND i.invoice_number = :number COLLATE NOCASE
+         AND i.seller = :seller COLLATE NOCASE
+       LIMIT 1
+     → if found: abort (return 409 with the existing record)
+  2. write the file into uploads/u{user_id}/
+  3. INSERT the invoice row
+}) — commit, or rollback (and the written file is deleted) on any error
+```
+
+### Concurrency: how simultaneous identical requests behave
+
+The naive design (check in one query, insert in another) has a **TOCTOU race**:
+two identical uploads could both pass the check milliseconds apart and both insert.
+Vaultly closes this race as follows:
+
+1. **Check and insert run inside a single interactive transaction**
+   (`prisma.$transaction`), not as two independent queries.
+2. **SQLite allows only one writer at a time.** All writes to the database are
+   serialized by SQLite's file lock, and both Vaultly processes (dev/production)
+   open the same `database/vaultly.db`.
+3. Therefore two concurrent identical uploads cannot interleave:
+   - If the first transaction has already committed when the second's check runs,
+     the second sees the row and is rejected with `409`.
+   - If they truly race for the write lock, SQLite blocks or rejects one
+     transaction (`SQLITE_BUSY`); the second one does not commit until the first
+     is finished, so its re-check sees the first's invoice.
+4. Because the file write is *inside* the transaction, a rollback can never leave
+   an orphan file, and a rejected duplicate can never leave a stored file.
+
+**Extra hardening (optional, not enabled):** a partial unique index
+`UNIQUE(user_id, seller, invoice_number)` would make duplicates *impossible* even
+under bug-level race conditions — but it would also forbid the documented
+deliberate "save anyway" exception, so Vaultly enforces duplicates via the
+transactional check instead.
+
+---
+
+## 8. Authentication: HttpOnly cookies + 7-day sessions
+
+Sessions now live in the **database** (`Sessions` table) instead of server memory:
+
+| Property | Value |
+|---|---|
+| Token | 256-bit cryptographically secure random hex |
+| Storage | `Sessions` table (token, user_id, expires_at, created_at) |
+| Lifetime | **7 days** (`expires_at`), auto-purged on expiry |
+| Transport | `Set-Cookie: vaultly_session=...; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax` |
+| Fallback | `Authorization: Bearer <token>` still works (API clients / future mobile app) |
+
+Consequences:
+- **Restarting the server no longer logs users out** — sessions live in SQLite, and the
+  React app re-validates via `GET /api/me` on load (`App.jsx` no longer trusts
+  localStorage).
+- The cookie is **HttpOnly**, so JavaScript/XSS cannot read the token.
+- `logout` deletes the DB row and clears the cookie (`Max-Age=0`).
+- `SameSite=Lax` blocks the cookie being sent by cross-site request forgery.
+- Every protected endpoint resolves the user via cookie-or-Bearer
+  (`getUserIdFromRequest`), so nothing else changed.
+
+---
+
+## 9. Testing
 
 ```bash
 python3 backend/test_invoices.py
@@ -185,8 +294,13 @@ traversal attempts, cross-user upload/read/download/delete denial, newest-first
 merge-sort ordering, and deletion removing both the row and the file.
 They run against an isolated temp database + temp uploads directory.
 
-Part B adds 6 more tests (section 9): editing metadata, re-link rejection for
-another user's product, invalid date rejection, `file_path` immutability,
-cross-user edit denial, and file survival across edits — **38 total, all passing**.
+Part C adds explicit product-linking tests plus cookie/session/duplicate tests
+(sections 8–10): upload to a nonexistent product, cross-user re-link rejection,
+HttpOnly cookie login/logout, forged-cookie rejection, per-user duplicate scope
+(case-insensitive, `409` with the existing record, `force` exception, no orphan
+files) — **53 total, all passing** (`npm test` from `backend-node/`).
+
+The Python-era suite (`backend/test_invoices.py`) predates these features and is
+kept only as reference for the legacy backend.
 
 Member 1's suite is unaffected: `python3 backend/test_suite.py` → 39 passed.
