@@ -292,9 +292,31 @@ Returns live calculated statistics, spending summaries, category counts, recentl
     { "month": "2026-01", "product_count": 2, "total_spent": 29990.0 }
   ],
   "upcoming_warranties": [],
-  "upcoming_returns": []
+  "upcoming_returns": [],
+  "reminders_checked_on": "2026-11-15",
+  "reminders": [
+    {
+      "reminder_id": "warranty-4",
+      "type": "warranty",
+      "kind": "warranty_urgent",
+      "product_id": 2,
+      "product_name": "MacBook Air M2",
+      "date": "2026-11-19",
+      "days_remaining": 4,
+      "message": "Warranty expires within 7 days",
+      "module_path": "/warranties",
+      "product_path": "/products/2"
+    }
+  ]
 }
 ```
+
+The `reminders` array is calculated when the dashboard endpoint is requested;
+it does not run while the browser is closed. Each warranty or return record is
+included at most once. Warranty reminders cover expired, 1–7 day, and 8–30 day
+windows. Return reminders cover pending deadlines within 3 days, overdue
+pending deadlines, and records marked `Closed`. All date differences use UTC
+calendar dates.
 
 ---
 

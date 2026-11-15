@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import StatCard from '../components/StatCard';
 import ProductTable from '../components/ProductTable';
+import './Dashboard.css';
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
@@ -108,42 +109,47 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Upcoming Reminders Section (Member 3 Integration Hook) */}
-      {((stats?.upcoming_warranties && stats.upcoming_warranties.length > 0) ||
-        (stats?.upcoming_returns && stats.upcoming_returns.length > 0)) && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
-          {stats.upcoming_warranties.length > 0 && (
-            <div className="card" style={{ borderLeft: '4px solid #f59e0b' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#b45309', marginBottom: '0.5rem' }}>
-                🛡️ Warranties Expiring Soon (≤30 Days)
-              </h3>
-              <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.875rem' }}>
-                {stats.upcoming_warranties.map((w) => (
-                  <li key={w.warranty_id} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{w.product_name}</span>
-                    <span className="badge badge-warning">{w.days_remaining} days remaining</span>
-                  </li>
-                ))}
-              </ul>
+      {/* Server-calculated reminders load with this dashboard request. They
+          are in-app only and do not run while the browser is closed. */}
+      {stats?.reminders?.length > 0 && (
+        <section className="card dashboard-reminders" aria-labelledby="dashboard-reminders-title">
+          <div className="dashboard-reminders-heading">
+            <div>
+              <h2 id="dashboard-reminders-title">Reminders</h2>
+              <p>Warranty and return dates that need attention</p>
             </div>
-          )}
-
-          {stats.upcoming_returns.length > 0 && (
-            <div className="card" style={{ borderLeft: '4px solid #ef4444' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#b91c1c', marginBottom: '0.5rem' }}>
-                ↩️ Approaching Return Deadlines (≤7 Days)
-              </h3>
-              <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.875rem' }}>
-                {stats.upcoming_returns.map((r) => (
-                  <li key={r.return_id} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{r.product_name}</span>
-                    <span className="badge badge-danger">{r.days_remaining} days left</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
+            <span className="dashboard-reminders-count">{stats.reminders.length}</span>
+          </div>
+          <ul className="dashboard-reminder-list">
+            {stats.reminders.map((reminder) => {
+              const expired = ['warranty_expired', 'return_expired', 'return_closed'].includes(reminder.kind);
+              const statusClass = expired ? 'dashboard-reminder-expired'
+                : reminder.days_remaining <= 7 ? 'dashboard-reminder-urgent'
+                  : 'dashboard-reminder-soon';
+              const remainingLabel = reminder.days_remaining < 0
+                ? `${Math.abs(reminder.days_remaining)} days past date`
+                : `${reminder.days_remaining} ${reminder.days_remaining === 1 ? 'day' : 'days'} remaining`;
+              return (
+                <li className={`dashboard-reminder ${statusClass}`} key={reminder.reminder_id}>
+                  <div className="dashboard-reminder-icon" aria-hidden="true">{reminder.type === 'warranty' ? '🛡️' : '↩️'}</div>
+                  <div className="dashboard-reminder-copy">
+                    <strong>{reminder.product_name}</strong>
+                    <span>{reminder.message}</span>
+                    <small>{reminder.type === 'warranty' ? 'Expiry' : 'Deadline'}: {reminder.date} · {remainingLabel}</small>
+                  </div>
+                  <div className="dashboard-reminder-actions">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(reminder.module_path)}>
+                      View {reminder.type === 'warranty' ? 'warranty' : 'return'}
+                    </button>
+                    <button type="button" className="dashboard-product-link" onClick={() => navigate(reminder.product_path)}>
+                      Product details
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {/* Middle Section: Recently Added Products & Category Breakdown */}

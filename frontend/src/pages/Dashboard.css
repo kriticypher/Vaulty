@@ -1,0 +1,21 @@
+.dashboard-reminders { margin-bottom: 2rem; padding: 1.25rem 1.4rem; }
+.dashboard-reminders-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
+.dashboard-reminders-heading h2 { color: var(--text-main); font-size: 1.15rem; font-weight: 700; margin-bottom: .15rem; }
+.dashboard-reminders-heading p { color: var(--text-muted); font-size: .84rem; }
+.dashboard-reminders-count { min-width: 2rem; height: 2rem; display: grid; place-items: center; padding: 0 .55rem; border-radius: 999px; background: var(--primary-light); color: var(--primary); font-size: .85rem; font-weight: 700; }
+.dashboard-reminder-list { list-style: none; display: flex; flex-direction: column; }
+.dashboard-reminder { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) auto; align-items: center; gap: .8rem; padding: .85rem .2rem; border-top: 1px solid var(--border); border-left: 3px solid transparent; }
+.dashboard-reminder-expired { border-left-color: var(--danger); }
+.dashboard-reminder-urgent { border-left-color: #f59e0b; }
+.dashboard-reminder-soon { border-left-color: var(--primary); }
+.dashboard-reminder-icon { width: 2.3rem; height: 2.3rem; display: grid; place-items: center; border-radius: 50%; background: var(--bg-page); }
+.dashboard-reminder-copy { display: flex; flex-direction: column; gap: .12rem; min-width: 0; }
+.dashboard-reminder-copy strong { color: var(--text-main); font-size: .93rem; }
+.dashboard-reminder-copy span { color: var(--text-main); font-size: .84rem; }
+.dashboard-reminder-copy small { color: var(--text-muted); font-size: .78rem; }
+.dashboard-reminder-expired .dashboard-reminder-copy span { color: var(--danger); }
+.dashboard-reminder-urgent .dashboard-reminder-copy span { color: #a16207; }
+.dashboard-reminder-actions { display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; }
+.dashboard-product-link { border: 0; padding: .2rem; background: transparent; color: var(--primary); cursor: pointer; font: inherit; font-size: .78rem; }
+.dashboard-product-link:hover { text-decoration: underline; }
+@media (max-width: 650px) { .dashboard-reminder { grid-template-columns: 2.5rem minmax(0, 1fr); } .dashboard-reminder-actions { grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: wrap; } }
